@@ -7,6 +7,7 @@ const fsp = require('fs/promises');
 const doc = require('./document');
 const { decodeBuffer } = require('./encoding');
 const { topUpFiles } = require('./seed');
+const updates = require('./update');
 const noteIO = require('./notes');
 const { createSearchIndex } = require('./search');
 const configStore = require('./config');
@@ -588,6 +589,7 @@ function registerIpc() {
     if (patch?.ui) Object.assign(settings.ui, patch.ui);
     if (patch?.editor) Object.assign(settings.editor, patch.editor);
     if (patch?.window) Object.assign(settings.window, patch.window);
+    if (patch?.update) Object.assign(settings.update, patch.update);
     // null means "put the defaults back"; an array replaces them.
     if (patch && 'formats' in patch) {
       settings.formats = patch.formats === null
@@ -768,6 +770,12 @@ function registerIpc() {
     shell.showItemInFolder(full);
   });
 
+  // No URL crosses this channel: the page is a constant in update.js, and a
+  // release feed must never be able to choose where the browser goes.
+  ipcMain.handle('app:openReleases', async () => {
+    await shell.openExternal(updates.RELEASES_PAGE);
+  });
+
   ipcMain.handle('shell:openExternal', async (_e, url) => {
     if (/^https?:/i.test(String(url))) await shell.openExternal(url);
   });
@@ -800,11 +808,28 @@ app.whenReady().then(() => {
   silenceSpellchecker();
   Menu.setApplicationMenu(null);
   createWindow();
+  announceUpdate();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+/**
+ * Look for a newer release, once, and only say so if there is one.
+ *
+ * Held back so it never competes with opening the last note, and skipped
+ * outside a packaged app, where the version in package.json is whatever the
+ * working tree happens to say.
+ */
+function announceUpdate() {
+  if (!app.isPackaged || settings.update?.check === false) return;
+  setTimeout(async () => {
+    const found = await updates.checkForUpdate(app.getVersion());
+    if (!found || !mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('app:update', found);
+  }, 6000).unref();
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

@@ -16,7 +16,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { app, ipcMain } = require('electron');
+const { app, ipcMain, shell } = require('electron');
+
+// One channel's whole job is to open a browser. Hold that back so the suite
+// stays true to "npm test does not touch the machine", and record that it was
+// asked -- being asked is the thing worth checking.
+const opened = [];
+shell.openExternal = async (url) => { opened.push(url); };
 
 let passed = 0;
 let failed = 0;
@@ -170,6 +176,12 @@ async function main() {
     data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
   });
   await checked('shell:openExternal (무시되는 값)', 'shell:openExternal', 'not-a-url');
+  ok('무시되는 값은 브라우저를 열지 않음', opened.length === 0, JSON.stringify(opened));
+
+  await checked('app:openReleases', 'app:openReleases');
+  ok('받는 곳 하나만 열림', opened.length === 1, JSON.stringify(opened));
+  ok('받는 곳은 이 저장소의 releases',
+    opened[0] === 'https://github.com/sf-mantis/csfreenote/releases/latest', opened[0]);
 
   console.log(`\n통과 ${passed} / 실패 ${failed}`);
   fs.rmSync(root, { recursive: true, force: true });

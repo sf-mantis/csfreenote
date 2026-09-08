@@ -829,6 +829,7 @@ async function openSettings() {
   document.getElementById('setReturnToBrowse').checked = current.editor.returnToBrowse !== false;
   document.getElementById('setDateFormat').value = current.editor.dateFormat || DEFAULT_FORMAT;
   document.getElementById('setTableEditing').checked = current.editor.tableEditing === true;
+  document.getElementById('setUpdateCheck').checked = current.update?.check !== false;
   document.getElementById('setMinimizeToTray').checked = current.window.minimizeToTray === true;
   updateDateFormatPreview();
   await refreshBooks();
@@ -3265,6 +3266,9 @@ function bindEvents() {
     hideTableHandles();
     await api.saveSettings({ editor: { tableEditing: event.target.checked } });
   });
+  document.getElementById('setUpdateCheck').onchange = async (event) => {
+    await api.saveSettings({ update: { check: event.target.checked } });
+  };
   document.getElementById('setMinimizeToTray').onchange = async (event) => {
     await api.saveSettings({ window: { minimizeToTray: event.target.checked } });
   };
@@ -3502,6 +3506,17 @@ function handleShortcut(event) {
 function bindLifecycle() {
   // The window stays open until this finishes, so a pending autosave is
   // written rather than cancelled.
+  // A version number is all that arrives; the button asks the main process to
+  // open the page, which decides for itself where that is.
+  api.onUpdateAvailable?.((found) => {
+    const version = String(found?.version || '').slice(0, 20);
+    if (!version) return;
+    showToast(`새 판 ${version} 이 나왔습니다.`, 'notice', {
+      label: '받는 곳 열기',
+      run: () => api.openReleases(),
+    });
+  });
+
   api.onFlushRequest(async () => {
     // A normal save goes out without a word. Only work the file turned away
     // is worth stopping someone for.

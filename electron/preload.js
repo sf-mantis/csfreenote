@@ -38,4 +38,9 @@ contextBridge.exposeInMainWorld('csNote', {
   // Asking the user takes as long as it takes. This stops the close deadline
   // so a dialog is not answered by the window vanishing.
   flushHold: () => ipcRenderer.send('app:flush-hold'),
+
+  // The renderer is told a version number and nothing else; where the button
+  // goes is decided in the main process.
+  onUpdateAvailable: (handler) => ipcRenderer.on('app:update', (_e, found) => handler(found)),
+  openReleases: () => ipcRenderer.invoke('app:openReleases'),
 });

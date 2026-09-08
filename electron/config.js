@@ -84,6 +84,9 @@ function defaults() {
       dateFormat: 'yyyy-mm-dd hh:nn:ss dddd',
       tableEditing: false,
     },
+    // Telling someone a new version exists costs one request at startup and
+    // nothing after. It is off only for those who would rather not be asked.
+    update: { check: true },
     formats: defaultFormats(),
   };
 }
@@ -174,6 +177,9 @@ function normalise(raw) {
       tableEditing: flag(input.editor?.tableEditing, false),
       dateFormat: String(input.editor?.dateFormat ?? base.editor.dateFormat).slice(0, 80)
         || base.editor.dateFormat,
+    },
+    update: {
+      check: flag(input.update?.check, true),
     },
   };
 
