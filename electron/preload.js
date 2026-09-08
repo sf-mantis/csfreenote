@@ -43,4 +43,12 @@ contextBridge.exposeInMainWorld('csNote', {
   // goes is decided in the main process.
   onUpdateAvailable: (handler) => ipcRenderer.on('app:update', (_e, found) => handler(found)),
   openReleases: () => ipcRenderer.invoke('app:openReleases'),
+
+  // Files a note carries. A note path and a file name cross here, never a
+  // path of our own making: the main process resolves every one of them.
+  listAttachments: (payload) => ipcRenderer.invoke('attach:list', payload),
+  addAttachments: (payload) => ipcRenderer.invoke('attach:add', payload),
+  removeAttachment: (payload) => ipcRenderer.invoke('attach:remove', payload),
+  openAttachment: (payload) => ipcRenderer.invoke('attach:open', payload),
+  attachmentRef: (payload) => ipcRenderer.invoke('attach:ref', payload),
 });

@@ -2169,6 +2169,115 @@ async function replaceInNote(win) {
 }
 
 /**
+ * A picture has to be removable with the mouse.
+ *
+ * Chromium puts a collapsed caret in the text beside an image when you click
+ * it, so Delete had nothing to act on: a picture could be inserted and then
+ * only reached by editing the source. The fix is to select it on click and let
+ * the browser do the deleting, which is also what keeps it in the undo stack.
+ *
+ * The key press itself needs trusted input, which this harness cannot send —
+ * that was measured separately. What is checked here is the selection the
+ * click leaves behind, and that the delete command acting on that selection
+ * takes the picture out. Those are the two halves the key press joins.
+ */
+async function clickingAPictureSelectsIt(win) {
+  console.log('\n■ 그림을 클릭하면 선택된다');
+
+  const original = await win.webContents.executeJavaScript('window.__doc', true);
+
+  const r = await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const pick = (m) => [...document.querySelectorAll('.mode-btn')].find(b => b.dataset.mode === m);
+    const GIF = 'data:image/gif;base64,'
+      + 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+    pick('browse').click();
+    await wait(700);
+    window.__doc = '<html><head><title>t</title></head><body>'
+      + '<p>앞 글자</p><p><img id="pic" width="80" height="60" src="' + GIF + '"></p>'
+      + '<p>뒤 글자</p></body></html>';
+    window.__mtime += 1;
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(400);
+
+    const d = document.getElementById('noteFrame').contentDocument;
+    const view = d.defaultView;
+    const held = () => {
+      const sel = view.getSelection();
+      if (!sel.rangeCount) return false;
+      const r = sel.getRangeAt(0);
+      return [...r.cloneContents().childNodes].some(n => n.nodeName === 'IMG');
+    };
+    const clickPic = () => {
+      const pic = d.getElementById('pic');
+      pic.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true }));
+    };
+
+    // 보기 모드에서는 고르지 않는다 — 지울 수 없는 자리에서 선택은 뜻이 없다
+    pick('browse').click();
+    await wait(250);
+    clickPic();
+    await wait(100);
+    const inBrowse = held();
+
+    pick('edit').click();
+    await wait(350);
+    clickPic();
+    await wait(120);
+    const inEdit = held();
+    const collapsed = view.getSelection().isCollapsed;
+
+    // 그 선택을 두고 지우면 그림이 나간다 — 키가 하는 일과 같은 길이다
+    d.body.focus();
+    const before = d.body.innerHTML;
+    d.execCommand('delete');
+    await wait(150);
+    const gone = !d.getElementById('pic');
+
+    // 되돌리기로 다시 돌아온다
+    d.execCommand('undo');
+    await wait(150);
+    const back = !!d.getElementById('pic');
+
+    // 글자를 클릭해도 그림을 잡지는 않는다. 합성 클릭은 캐럿을 옮기지 못하니
+    // 먼저 선택을 접어 두고, 그 상태가 그대로인지를 본다 — 우리 핸들러가
+    // 아무것도 새로 잡지 않는다는 뜻이다.
+    const sel = view.getSelection();
+    sel.removeAllRanges();
+    const flat = d.createRange();
+    flat.setStart(d.querySelectorAll('p')[0], 0);
+    flat.collapse(true);
+    sel.addRange(flat);
+    const para = d.querySelectorAll('p')[0];
+    para.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true }));
+    await wait(100);
+    const onText = held();
+
+    return { inBrowse, inEdit, collapsed, gone, back, onText, hadPic: before.includes('id="pic"') };
+  })()`, true);
+
+  ok('편집 모드에서 그림을 클릭하면 선택된다', r.inEdit, JSON.stringify(r));
+  ok('선택이 접혀 있지 않다', r.collapsed === false);
+  ok('보기 모드에서는 선택하지 않는다', r.inBrowse === false);
+  ok('글자를 클릭하면 그림을 잡지 않는다', r.onText === false);
+  ok('그 선택으로 지우면 그림이 나간다', r.hadPic && r.gone);
+  ok('되돌리기로 다시 돌아온다', r.back);
+
+  // 뒤따르는 검사가 이 문서에 의지한다.
+  await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    [...document.querySelectorAll('.mode-btn')]
+      .find(b => b.dataset.mode === 'browse').click();
+    await wait(900);
+    window.__doc = ${JSON.stringify(original)};
+    window.__mtime += 1;
+  })()`, true);
+}
+
+/**
  * The dark rendering must map the note's own colours, follow the single theme
  * control, and never reach the file.
  */
@@ -2805,6 +2914,7 @@ app.whenReady().then(async () => {
   await idleSpansLeaveTheFileNotTheEditor(win);
   await findInNote(win);
   await replaceInNote(win);
+  await clickingAPictureSelectsIt(win);
   await darkNoteSurface(win);
 
   await statusBar(win);

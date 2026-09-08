@@ -66,6 +66,24 @@ function encodePath(text) {
 }
 
 /**
+ * A book-relative path after any folder it sits under has itself moved.
+ *
+ * Most links point at something that stays put, and the arithmetic is only
+ * about where the note now stands. Attachments are the exception: a note's own
+ * files live in a folder named after the note, so moving or renaming the note
+ * moves the target too. `moves` carries those, longest prefix first, so a
+ * nested pair cannot be shadowed by its parent.
+ */
+function afterMoves(target, moves) {
+  for (const { from, to } of moves) {
+    if (!from) continue;
+    if (target === from) return to;
+    if (target.startsWith(`${from}/`)) return to + target.slice(from.length);
+  }
+  return target;
+}
+
+/**
  * The same target, expressed from a new folder.
  *
  * `fromDir` and `toDir` are the note's folder before and after, relative to
@@ -73,7 +91,7 @@ function encodePath(text) {
  * left exactly as it is — fixed, malformed, or reaching outside the book,
  * where we cannot know what it meant.
  */
-function relink(url, fromDir, toDir) {
+function relink(url, fromDir, toDir, moves = []) {
   if (isFixed(url)) return null;
 
   const [body, rest] = splitUrl(String(url));
@@ -84,7 +102,7 @@ function relink(url, fromDir, toDir) {
   const target = path.posix.normalize(path.posix.join(fromDir || '.', decoded));
   if (target === '..' || target.startsWith('../')) return null;   // outside the book
 
-  const next = path.posix.relative(toDir || '.', target);
+  const next = path.posix.relative(toDir || '.', afterMoves(target, moves));
   if (!next) return null;
 
   const encoded = encodePath(next) + rest;
@@ -94,17 +112,25 @@ function relink(url, fromDir, toDir) {
 /**
  * Rewrite every relative link in the document for the note's new folder.
  *
+ * `moves` names folders that moved along with the note — the note's own
+ * attachment folder is one, since it is named after the note. Renaming a note
+ * changes nothing about where the note sits, so `fromDir` and `toDir` match
+ * and only `moves` has anything to say; that is still work worth doing.
+ *
  * Returns the document unchanged — the same string — when nothing needed to
  * move, so a caller can tell without comparing and skip the write.
  */
-function rewriteLinks(html, fromDir, toDir) {
-  if (fromDir === toDir) return String(html);
+function rewriteLinks(html, fromDir, toDir, moves = []) {
+  const real = moves.filter((m) => m && m.from && m.from !== m.to);
+  if (fromDir === toDir && !real.length) return String(html);
+  // Longest first: `_files/a/b` must win over `_files/a`.
+  real.sort((x, y) => y.from.length - x.from.length);
 
   return String(html).replace(TAG, (tag) => {
     if (SKIP_TAG.test(tag)) return tag;
     return tag.replace(ATTR, (whole, lead, dq, sq, bare) => {
       const value = dq !== undefined ? dq : (sq !== undefined ? sq : bare);
-      const next = relink(value, fromDir, toDir);
+      const next = relink(value, fromDir, toDir, real);
       if (next === null) return whole;
       if (dq !== undefined) return `${lead}"${next}"`;
       if (sq !== undefined) return `${lead}'${next}'`;
@@ -113,4 +139,4 @@ function rewriteLinks(html, fromDir, toDir) {
   });
 }
 
-module.exports = { isFixed, relink, rewriteLinks };
+module.exports = { isFixed, relink, rewriteLinks, afterMoves };

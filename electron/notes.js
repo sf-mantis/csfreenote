@@ -19,6 +19,7 @@ const { pathToFileURL } = require('url');
 const doc = require('./document');
 const { decodeBuffer, encodeDocument } = require('./encoding');
 const { rewriteLinks } = require('./links');
+const attach = require('./attach');
 
 /** Resolve a book-relative path, refusing anything that escapes the book. */
 function safeJoin(root, relativePath) {
@@ -367,7 +368,14 @@ async function listNotes(bookDir, folderRelative) {
 }
 
 /**
- * Fix the links of everything that just moved.
+ * Fix the links of everything that just moved, and carry its files along.
+ *
+ * Two different things break a note's links, and a note can suffer both at
+ * once. The note's own folder changing alters what `../` counts to — that is
+ * the pasted-image case. And a note's attachment folder is named after the
+ * note, so moving *or renaming* the note moves the target as well. Renaming
+ * leaves the note exactly where it stood, so nothing but the second kind
+ * happens, which is why this has to run for a rename too.
  *
  * No backup is taken. Every other write to a note keeps one, but this write
  * differs from the file it replaces only inside attribute values, and taking
@@ -398,9 +406,10 @@ async function relinkMoved(bookDir, fromRelative, toRelative) {
   for (const [was, now] of pairs) {
     try {
       /* eslint-disable no-await-in-loop */
+      const drawer = await attach.relocate(bookDir, was, now);
       const file = safeJoin(bookDir, now);
       const { html } = decodeBuffer(await fsp.readFile(file));
-      const next = rewriteLinks(html, dirOf(was), dirOf(now));
+      const next = rewriteLinks(html, dirOf(was), dirOf(now), drawer ? [drawer] : []);
       if (next === html) continue;
       await writeFileAtomic(file, encodeDocument(next));
       changed += 1;

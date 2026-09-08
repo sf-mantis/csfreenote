@@ -4,11 +4,13 @@ const {
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
+const { pathToFileURL } = require('url');
 const doc = require('./document');
 const { decodeBuffer } = require('./encoding');
 const { topUpFiles } = require('./seed');
 const updates = require('./update');
 const noteIO = require('./notes');
+const attach = require('./attach');
 const { createSearchIndex } = require('./search');
 const configStore = require('./config');
 
@@ -26,7 +28,7 @@ const NOTE_EXT = /\.(htm|html)$/i;
 const FLUSH_TIMEOUT_MS = 3000;
 
 // Folders the app keeps for itself: they are not part of the user's tree.
-const HIDDEN_DIRS = new Set([noteIO.ASSET_DIR, noteIO.BACKUP_DIR]);
+const HIDDEN_DIRS = new Set([noteIO.ASSET_DIR, noteIO.BACKUP_DIR, attach.ATTACH_DIR]);
 
 const searchIndex = createSearchIndex({ hiddenDirs: HIDDEN_DIRS });
 
@@ -206,6 +208,7 @@ function rendererConfig() {
     autosaveMs: settings.editor.autosaveMs,
     returnToBrowse: settings.editor.returnToBrowse,
     tableEditing: settings.editor.tableEditing,
+    attachOpen: settings.editor.attachOpen,
     dateFormat: settings.editor.dateFormat,
     searchWholeBook: settings.ui.searchWholeBook,
   };
@@ -728,9 +731,14 @@ function registerIpc() {
     const renamed = path.relative(bookDir(), dest).replace(/\\/g, '/');
     // A backup belongs to the note, so it follows the note to its new name.
     await noteIO.relocateBackup(bookDir(), relativePath, renamed);
+    // So does the note's own file drawer — and because that drawer is named
+    // after the note, renaming moves what the note's links point at even
+    // though the note itself has not budged. Same path as a move for exactly
+    // that reason.
+    const relinked = await noteIO.relinkMoved(bookDir(), relativePath, renamed);
     forgetSearchEntry(relativePath);
     remapLastPage(relativePath, renamed);
-    return { ok: true, relativePath: renamed };
+    return { ok: true, relativePath: renamed, relinked };
   });
 
   ipcMain.handle('item:delete', async (_e, { relativePath }) => {
@@ -774,6 +782,98 @@ function registerIpc() {
   // release feed must never be able to choose where the browser goes.
   ipcMain.handle('app:openReleases', async () => {
     await shell.openExternal(updates.RELEASES_PAGE);
+  });
+
+  /* --- files a note carries ---------------------------------------------- *
+   *
+   * The renderer names a note and a file name, never a path. Every channel
+   * here resolves the path itself, through attach.attachDir, which refuses
+   * anything that climbs out of the book. A name arriving with separators in
+   * it is put through safeName and comes out as a name again.
+   * ---------------------------------------------------------------------- */
+
+  ipcMain.handle('attach:list', async (_e, { relativePath }) =>
+    attach.listAttachments(bookDir(), relativePath));
+
+  /**
+   * Copy chosen files into the note's own folder.
+   *
+   * The staging folder beside the exe is where they land first, so a file the
+   * user picked off a slow share or a phone is fully in hand before it is
+   * committed to the book. Only then does it move in, under a name that is
+   * free — a second 도면.png becomes 도면 (2).png rather than replacing one.
+   */
+  ipcMain.handle('attach:add', async (_e, { relativePath }) => {
+    if (!relativePath) return { ok: false, message: '노트를 먼저 열어 주십시오.' };
+
+    const twin = attach.collides(bookDir(), relativePath);
+    if (twin) {
+      return {
+        ok: false,
+        message: `'${twin}' 과 붙임 폴더가 겹칩니다. 한쪽의 이름을 바꿔 주십시오.`,
+      };
+    }
+
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '붙일 파일 고르기',
+      properties: ['openFile', 'multiSelections', 'dontAddToRecent'],
+    });
+    if (picked.canceled || !picked.filePaths.length) return { ok: true, added: [] };
+
+    const dir = attach.attachDir(bookDir(), relativePath);
+    await fsp.mkdir(dir, { recursive: true });
+    const stage = tempDir();
+    const added = [];
+    for (const source of picked.filePaths) {
+      /* eslint-disable no-await-in-loop */
+      const held = path.join(stage, `${Date.now()}-${path.basename(source)}`);
+      try {
+        await fsp.copyFile(source, held);
+        const name = attach.freeName(dir, path.basename(source));
+        await fsp.rename(held, path.join(dir, name));
+        added.push(name);
+      } catch (err) {
+        await fsp.rm(held, { force: true });
+        return { ok: false, added, message: `'${path.basename(source)}' 을 붙이지 못했습니다: ${err.message}` };
+      }
+    }
+    return { ok: true, added };
+  });
+
+  ipcMain.handle('attach:remove', async (_e, { relativePath, name }) => {
+    const dir = attach.attachDir(bookDir(), relativePath);
+    const file = path.join(dir, attach.safeName(name));
+    // The recycle bin, like every other deletion in this app. An attachment is
+    // often the only copy, and _backup keeps notes rather than their files.
+    if (fs.existsSync(file)) await shell.trashItem(file);
+    return { ok: true };
+  });
+
+  ipcMain.handle('attach:open', async (_e, { relativePath, name }) => {
+    const dir = attach.attachDir(bookDir(), relativePath);
+    const file = path.join(dir, attach.safeName(name));
+    if (!fs.existsSync(file)) return { ok: false, message: '그 파일이 없습니다.' };
+    const failed = await shell.openPath(file);
+    return failed ? { ok: false, message: failed } : { ok: true };
+  });
+
+  /**
+   * What the renderer needs to put one of these into a note, or show it.
+   *
+   * `href` is what goes in the document: relative to the note's own folder, so
+   * a browser finds it with the program gone. `preview` is a file:// URL for
+   * the panel's own <img>, which lives in the app window and never reaches
+   * the note.
+   */
+  ipcMain.handle('attach:ref', async (_e, { relativePath, name }) => {
+    const safe = attach.safeName(name);
+    const dir = attach.attachDir(bookDir(), relativePath);
+    return {
+      name: safe,
+      href: attach.hrefFor(relativePath, safe),
+      image: attach.isImage(safe),
+      preview: pathToFileURL(path.join(dir, safe)).href,
+    };
   });
 
   ipcMain.handle('shell:openExternal', async (_e, url) => {

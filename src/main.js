@@ -116,6 +116,20 @@ const el = {
   replaceInput: document.getElementById('replaceInput'),
   replaceOne: document.getElementById('replaceOne'),
   replaceAll: document.getElementById('replaceAll'),
+  attachPanel: document.getElementById('attachPanel'),
+  attachToggle: document.getElementById('attachToggle'),
+  attachTitle: document.getElementById('attachTitle'),
+  attachChevron: document.getElementById('attachChevron'),
+  attachBody: document.getElementById('attachBody'),
+  attachPreview: document.getElementById('attachPreview'),
+  attachImage: document.getElementById('attachImage'),
+  attachKind: document.getElementById('attachKind'),
+  attachList: document.getElementById('attachList'),
+  attachInsert: document.getElementById('attachInsert'),
+  attachInsertLeft: document.getElementById('attachInsertLeft'),
+  attachInsertRight: document.getElementById('attachInsertRight'),
+  attachAdd: document.getElementById('attachAdd'),
+  attachRemove: document.getElementById('attachRemove'),
   formatBar: document.getElementById('formatBar'),
   tableHandles: document.getElementById('tableHandles'),
   rowInsert: document.getElementById('rowInsert'),
@@ -460,6 +474,8 @@ async function applyMode(mode) {
   el.formatBar.classList.toggle('disabled', !editable);
   // 모드가 바뀌면 바꾸기 단추가 따라 숨거나 돌아온다.
   showReplace();
+  // 붙임 칸은 편집 모드에만 있다. 노트를 바꿔 왔을 수도 있으므로 목록도 다시 읽는다.
+  void refreshAttachments({ settleOpen: true });
   el.sourceEditor.classList.toggle('hidden', mode !== 'source');
   el.frame.classList.toggle('hidden', mode === 'source');
   applyEditableState();
@@ -958,6 +974,256 @@ function replaceEvery() {
   el.findCount.textContent = done ? `${done}곳 바꿈` : '없음';
   if (refused) showToast(`${done}곳까지 바꾸고 멈췄습니다.`);
   else if (done) showToast(`${done}곳을 바꿨습니다. 되돌리기는 ${done}번입니다.`, 'notice');
+}
+
+/* ------------------------------------------------------------------ *
+ * Files a note carries
+ *
+ * The panel shows under the note while editing. One file at a time is
+ * selected and the buttons act on that — the alternative, a row of buttons
+ * per file, makes the list wide and leaves nowhere to show a picture big
+ * enough to recognise.
+ *
+ * Inserting goes through execCommand, like every other change to a note, so
+ * that Ctrl+Z walks back through it. See the replace section above for why
+ * that is not negotiable.
+ * ------------------------------------------------------------------ */
+
+const attachState = { files: [], selected: '', open: true };
+
+/** Only where a note can be changed, and only when a note is open. */
+function attachVisible() {
+  return Boolean(state.currentPath) && state.mode === 'edit';
+}
+
+/** An image can be placed; anything else can only be linked. */
+function attachSelected() {
+  return attachState.files.find((f) => f.name === attachState.selected) || null;
+}
+
+function renderAttachList() {
+  const list = el.attachList;
+  list.textContent = '';
+
+  if (!attachState.files.length) {
+    const empty = document.createElement('li');
+    empty.className = 'attach-empty';
+    empty.textContent = '붙은 파일이 없습니다.';
+    list.appendChild(empty);
+  }
+
+  for (const file of attachState.files) {
+    const row = document.createElement('li');
+    row.className = `attach-item${file.name === attachState.selected ? ' on' : ''}`;
+    row.dataset.name = file.name;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(file.name === attachState.selected));
+    row.title = file.name;
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = file.name;
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = formatBytes(file.bytes);
+    row.append(name, size);
+    list.appendChild(row);
+  }
+
+  el.attachTitle.textContent = attachState.files.length
+    ? `붙임 파일 (${attachState.files.length})`
+    : '붙임 파일';
+}
+
+/**
+ * Show the selected file.
+ *
+ * The <img> here belongs to the app window, not to the note, and is fed a
+ * file:// URL the main process built. Nothing about this reaches the document.
+ */
+async function renderAttachPreview() {
+  const file = attachSelected();
+  el.attachImage.hidden = true;
+  el.attachImage.removeAttribute('src');
+  el.attachKind.textContent = '';
+
+  const has = Boolean(file);
+  el.attachInsert.disabled = !has;
+  el.attachRemove.disabled = !has;
+  // Placing left or right only means something for a picture; a link has no
+  // side to sit on.
+  el.attachInsertLeft.disabled = !has || !file.image;
+  el.attachInsertRight.disabled = !has || !file.image;
+
+  if (!file) return;
+  if (!file.image) {
+    const dot = file.name.lastIndexOf('.');
+    el.attachKind.textContent = dot > 0 ? file.name.slice(dot + 1) : '파일';
+    return;
+  }
+  const ref = await api.attachmentRef({ relativePath: state.currentPath, name: file.name });
+  if (!ref || attachState.selected !== file.name) return;
+  el.attachImage.src = ref.preview;
+  el.attachImage.hidden = false;
+}
+
+function applyAttachOpen() {
+  el.attachBody.classList.toggle('collapsed', !attachState.open);
+  el.attachChevron.textContent = attachState.open ? '▾' : '▸';
+  el.attachToggle.setAttribute('aria-expanded', String(attachState.open));
+}
+
+/**
+ * Read what the note has and draw it.
+ *
+ * Opened for a note that already carries files, folded away for one that does
+ * not — most notes never get an attachment, and the space belongs to the note
+ * until there is a reason to take it.
+ */
+async function refreshAttachments({ settleOpen = false } = {}) {
+  el.attachPanel.classList.toggle('hidden', !attachVisible());
+  if (!attachVisible()) return;
+
+  // A preload without this API is one the panel has nothing to say to. Asking
+  // anyway threw before the promise existed, so the catch never saw it.
+  if (!api.listAttachments) {
+    el.attachPanel.classList.add('hidden');
+    return;
+  }
+  const files = await api.listAttachments({ relativePath: state.currentPath })
+    .catch(() => []);
+  attachState.files = Array.isArray(files) ? files : [];
+  if (!attachState.files.some((f) => f.name === attachState.selected)) {
+    attachState.selected = attachState.files.length ? attachState.files[0].name : '';
+  }
+  if (settleOpen) {
+    attachState.open = state.attachOpen !== false && attachState.files.length > 0;
+    applyAttachOpen();
+  }
+  renderAttachList();
+  await renderAttachPreview();
+}
+
+function selectAttachment(name) {
+  if (attachState.selected === name) return;
+  attachState.selected = name;
+  renderAttachList();
+  void renderAttachPreview();
+}
+
+/** Move the selection with the arrow keys, the way the list dialogs do. */
+function stepAttachment(step) {
+  if (!attachState.files.length) return;
+  const at = attachState.files.findIndex((f) => f.name === attachState.selected);
+  const next = Math.min(Math.max((at === -1 ? 0 : at) + step, 0), attachState.files.length - 1);
+  selectAttachment(attachState.files[next].name);
+  const row = el.attachList.querySelector('.attach-item.on');
+  if (row) row.scrollIntoView({ block: 'nearest' });
+}
+
+const ATTACH_PLACE = {
+  inline: 'vertical-align: middle;',
+  left: 'float: left; margin: 0 12px 6px 0;',
+  right: 'float: right; margin: 0 0 6px 12px;',
+};
+
+/**
+ * Put the selected file into the note.
+ *
+ * A picture goes in as a picture; anything else goes in as a link to itself,
+ * which is the only useful thing to say about a spreadsheet in running text.
+ * `inline` sits in the line with the text centred against it; left and right
+ * float, so the words run alongside — those two cannot be combined, since a
+ * floated picture has left the line box that the centring would apply to.
+ */
+async function insertAttachment(where) {
+  const file = attachSelected();
+  if (!file || !frameDoc || state.mode !== 'edit') return;
+  if (where !== 'inline' && !file.image) return;
+
+  const ref = await api.attachmentRef({ relativePath: state.currentPath, name: file.name });
+  if (!ref) return;
+
+  const href = escapeAttr(ref.href);
+  const label = escapeHtml(ref.name);
+  const html = ref.image
+    ? `<img src="${href}" alt="${label}" style="${ATTACH_PLACE[where]}">`
+    : `<a href="${href}">${label}</a>`;
+
+  frameDoc.body.focus();
+  if (frameDoc.execCommand('insertHTML', false, html) !== true) {
+    showToast('넣지 못했습니다. 편집 모드인지 확인해 주십시오.');
+    return;
+  }
+  scheduleSave();
+}
+
+async function addAttachments() {
+  if (!state.currentPath) return;
+  const result = await api.addAttachments({ relativePath: state.currentPath });
+  if (result && result.ok === false) showToast(result.message);
+  if (result && Array.isArray(result.added) && result.added.length) {
+    attachState.selected = result.added[result.added.length - 1];
+    attachState.open = true;
+    applyAttachOpen();
+    showToast(`${result.added.length}개를 붙였습니다.`, 'notice');
+  }
+  await refreshAttachments();
+}
+
+/**
+ * Remove the selected file.
+ *
+ * Asked about twice over when the note is using it: the link would break
+ * silently, and `_backup` keeps notes rather than their files, so there is
+ * nowhere to get it back from except the recycle bin.
+ */
+async function removeAttachment() {
+  const file = attachSelected();
+  if (!file) return;
+
+  const ref = await api.attachmentRef({ relativePath: state.currentPath, name: file.name });
+  const used = ref ? noteUsesHref(ref.href) : false;
+  const ok = await confirmDialog(
+    '붙임 파일 삭제',
+    used
+      ? `'${file.name}' 은 본문에서 쓰이고 있습니다. 지우면 그 자리가 깨집니다.`
+      : `'${file.name}' 을 휴지통으로 보냅니다.`,
+    '삭제',
+  );
+  if (!ok) return;
+
+  const result = await api.removeAttachment({ relativePath: state.currentPath, name: file.name });
+  if (result && result.ok === false) {
+    showToast(result.message);
+    return;
+  }
+  attachState.selected = '';
+  await refreshAttachments();
+}
+
+/** Does the note point at this file anywhere? */
+function noteUsesHref(href) {
+  if (!frameDoc || !frameDoc.body) return false;
+  const want = decodeURIComponent(String(href));
+  for (const node of frameDoc.body.querySelectorAll('[src], [href]')) {
+    const value = node.getAttribute('src') || node.getAttribute('href') || '';
+    let plain = value;
+    try {
+      plain = decodeURIComponent(value);
+    } catch {
+      /* leave it as it came */
+    }
+    if (plain === want) return true;
+  }
+  return false;
+}
+
+async function openAttachment() {
+  const file = attachSelected();
+  if (!file) return;
+  const result = await api.openAttachment({ relativePath: state.currentPath, name: file.name });
+  if (result && result.ok === false) showToast(result.message);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1922,6 +2188,7 @@ async function openNote(relative, displayName, { ask = false } = {}) {
   state.fullHtml = note.html;
   state.pendingDoc = null;
   state.holdMessage = '';
+  attachState.selected = '';
   state.dirty = false;
 
   const segments = note.relativePath.split('/');
@@ -2311,6 +2578,33 @@ function onFrameClick(event) {
   }
 }
 
+/**
+ * Clicking a picture selects it.
+ *
+ * Chromium leaves the selection collapsed in the text beside an image, so
+ * Delete had nothing to act on and there was no way to take a picture out of a
+ * note with the mouse at all. Selecting it hands the job back to the browser:
+ * Delete, Backspace, cut and typing over it then all work, and every one of
+ * them lands in the undo stack. That is why this sets a selection instead of
+ * removing the element — reaching into the document is what once made Ctrl+Z
+ * put words back in the wrong places.
+ *
+ * Bubble phase on purpose. Chromium settles its own collapsed selection first,
+ * and ours has to be the one that stands.
+ */
+function selectClickedImage(event) {
+  if (state.mode !== 'edit' || !frameDoc) return;
+  const img = event.target && event.target.closest ? event.target.closest('img') : null;
+  if (!img) return;
+  const view = frameDoc.defaultView;
+  if (!view) return;
+  const range = frameDoc.createRange();
+  range.selectNode(img);
+  const selection = view.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 // Key events raised inside the iframe never reach the app window, so the
 // same shortcut handler is attached to the note document as well.
 /** Where the caret is drawn, or the cell itself when it has no rect to give. */
@@ -2558,6 +2852,7 @@ function renderNote(html, baseUrl) {
         frameDoc.addEventListener('input', onFrameInput);
         frameDoc.addEventListener('paste', onFramePaste, true);
         frameDoc.addEventListener('click', onFrameClick, true);
+          frameDoc.addEventListener('click', selectClickedImage);
         frameDoc.addEventListener('keydown', onFrameKeydown);
         frameDoc.addEventListener('mousemove', (event) => {
           const box = el.frame.getBoundingClientRect();
@@ -3409,6 +3704,7 @@ function bindEvents() {
 
   document.getElementById('setTableEditing').addEventListener('change', async (event) => {
     state.tableEditing = event.target.checked;
+  state.attachOpen = state.config.attachOpen !== false;
     hideTableHandles();
     await api.saveSettings({ editor: { tableEditing: event.target.checked } });
   });
@@ -3515,6 +3811,32 @@ function bindEvents() {
   document.getElementById('findPrev').addEventListener('click', () => runFind(-1));
   document.getElementById('findClose').addEventListener('click', closeFind);
   el.replaceOne.addEventListener('click', replaceCurrent);
+
+  el.attachToggle.addEventListener('click', async () => {
+    attachState.open = !attachState.open;
+    applyAttachOpen();
+    // 접었다 편 상태는 사람의 뜻이므로 남긴다.
+    state.attachOpen = attachState.open;
+    await api.saveSettings({ editor: { attachOpen: attachState.open } });
+  });
+  el.attachList.addEventListener('click', (event) => {
+    const row = event.target.closest('.attach-item');
+    if (row) selectAttachment(row.dataset.name);
+  });
+  el.attachList.addEventListener('dblclick', (event) => {
+    if (event.target.closest('.attach-item')) void openAttachment();
+  });
+  el.attachList.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); stepAttachment(1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); stepAttachment(-1); }
+    else if (event.key === 'Enter') { event.preventDefault(); void insertAttachment('inline'); }
+    else if (event.key === 'Delete') { event.preventDefault(); void removeAttachment(); }
+  });
+  el.attachInsert.addEventListener('click', () => void insertAttachment('inline'));
+  el.attachInsertLeft.addEventListener('click', () => void insertAttachment('left'));
+  el.attachInsertRight.addEventListener('click', () => void insertAttachment('right'));
+  el.attachAdd.addEventListener('click', () => void addAttachments());
+  el.attachRemove.addEventListener('click', () => void removeAttachment());
   el.replaceAll.addEventListener('click', replaceEvery);
   el.replaceInput.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); closeFind(); return; }

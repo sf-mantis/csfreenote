@@ -83,6 +83,7 @@ function defaults() {
       returnToBrowse: true,
       dateFormat: 'yyyy-mm-dd hh:nn:ss dddd',
       tableEditing: false,
+      attachOpen: true,
     },
     // Telling someone a new version exists costs one request at startup and
     // nothing after. It is off only for those who would rather not be asked.
@@ -175,6 +176,8 @@ function normalise(raw) {
       // table, so the row and column controls would hover over ordinary
       // writing there — and one of them deletes a row.
       tableEditing: flag(input.editor?.tableEditing, false),
+        // 붙임 칸을 접었는지. 붙은 파일이 없는 노트에서는 어차피 접혀 있다.
+        attachOpen: flag(input.editor?.attachOpen, true),
       dateFormat: String(input.editor?.dateFormat ?? base.editor.dateFormat).slice(0, 80)
         || base.editor.dateFormat,
     },

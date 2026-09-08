@@ -25,6 +25,7 @@ const tree = {
 
 window.__doc = '<html><head><title>t</title></head><body>\n<table bgcolor="#3c62c6"><tr><td><font color="#ffffff">머리글</font></td></tr></table>\n<p>처음</p>\n</body></html>';
 window.__mtime = 1;
+window.__files = [];
 
 function makeFormats() {
   const blank = {
@@ -87,6 +88,18 @@ window.csNote = {
   deleteItem: record('deleteItem', { ok: true }),
   moveItem: record('moveItem', { ok: true, relativePath: 'moved.html' }),
   saveImage: record('saveImage', { href: '../_images/a.png', fileName: 'a.png' }),
+    // Files a note carries. An in-memory drawer, so a note can be given one
+    // and the panel has something real to draw.
+    listAttachments: () => Promise.resolve(window.__files || []),
+    addAttachments: record('addAttachments', { ok: true, added: [] }),
+    removeAttachment: record('removeAttachment', { ok: true }),
+    openAttachment: record('openAttachment', { ok: true }),
+    attachmentRef: ({ name }) => Promise.resolve({
+      name,
+      href: '_files/노트/' + name,
+      image: /.(png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(name),
+      preview: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    }),
   searchNotes: (payload) => {
     calls.push({ name: 'searchNotes', payload });
     const q = String(payload.query || '').toLowerCase();

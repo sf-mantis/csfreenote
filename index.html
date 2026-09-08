@@ -116,6 +116,32 @@
                   sandbox="allow-same-origin"></iframe>
           <textarea id="sourceEditor" class="source-editor hidden" spellcheck="false"></textarea>
           <div id="sourceMark" class="source-mark"></div>
+          <section id="attachPanel" class="attach-panel hidden" aria-label="붙임 파일">
+            <button type="button" id="attachToggle" class="attach-toggle"
+                    aria-expanded="true" title="접기 / 펴기">
+              <span id="attachTitle">붙임 파일</span>
+              <span id="attachChevron" class="attach-chevron">▾</span>
+            </button>
+            <div id="attachBody" class="attach-body">
+              <div id="attachPreview" class="attach-preview">
+                <img id="attachImage" alt="" hidden />
+                <span id="attachKind" class="attach-kind"></span>
+              </div>
+              <ul id="attachList" class="attach-list" tabindex="0" role="listbox"
+                  aria-label="이 노트에 붙은 파일"></ul>
+              <div class="attach-actions">
+                <div class="attach-row">
+                  <button type="button" id="attachInsert" title="본문에 넣기">삽입</button>
+                  <button type="button" id="attachInsertLeft"
+                          title="왼쪽에 두고 글이 옆으로 흐르게">◧</button>
+                  <button type="button" id="attachInsertRight"
+                          title="오른쪽에 두고 글이 옆으로 흐르게">◨</button>
+                </div>
+                <button type="button" id="attachAdd">파일 첨부</button>
+                <button type="button" id="attachRemove">파일 삭제</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
