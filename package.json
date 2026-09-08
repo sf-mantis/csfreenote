@@ -8,6 +8,14 @@
   },
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sf-mantis/csfreenote.git"
+  },
+  "homepage": "https://github.com/sf-mantis/csfreenote#readme",
+  "bugs": {
+    "url": "https://github.com/sf-mantis/csfreenote/issues"
+  },
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:127.0.0.1:5173 && electron . --dev\"",
     "build": "vite build",
