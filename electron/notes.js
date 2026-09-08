@@ -18,6 +18,7 @@ const { pathToFileURL } = require('url');
 
 const doc = require('./document');
 const { decodeBuffer, encodeDocument } = require('./encoding');
+const { rewriteLinks } = require('./links');
 
 /** Resolve a book-relative path, refusing anything that escapes the book. */
 function safeJoin(root, relativePath) {
@@ -342,7 +343,72 @@ async function moveItem(bookDir, { relativePath, targetFolder, copy = false }) {
     await relocateBackup(bookDir, relativePath, targetRelative);
   }
 
-  return { ok: true, relativePath: targetRelative };
+  // A note's own links are relative to its folder, so the folder changing is
+  // the links changing meaning. Done after the move, on what is now there.
+  const relinked = await relinkMoved(bookDir, relativePath, targetRelative);
+
+  return { ok: true, relativePath: targetRelative, relinked };
+}
+
+/** Every note under a book-relative folder, skipping the hidden folders. */
+async function listNotes(bookDir, folderRelative) {
+  const out = [];
+  const walk = async (relative) => {
+    const full = safeJoin(bookDir, relative);
+    for (const entry of await fsp.readdir(full, { withFileTypes: true })) {
+      if (entry.name === BACKUP_DIR || entry.name === ASSET_DIR) continue;
+      const next = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(next);
+      else if (NOTE_EXT.test(entry.name)) out.push(next);
+    }
+  };
+  await walk(folderRelative);
+  return out;
+}
+
+/**
+ * Fix the links of everything that just moved.
+ *
+ * No backup is taken. Every other write to a note keeps one, but this write
+ * differs from the file it replaces only inside attribute values, and taking
+ * the slot would spend the user's one previous version on a drag of the mouse.
+ * Losing a real earlier draft to a tidy-up is worse than not being able to
+ * undo a link repair.
+ *
+ * A note that cannot be read or written is left alone: the move itself has
+ * already happened and is not worth failing over a picture.
+ */
+async function relinkMoved(bookDir, fromRelative, toRelative) {
+  const pairs = [];
+  const full = safeJoin(bookDir, toRelative);
+  if ((await fsp.stat(full)).isDirectory()) {
+    for (const now of await listNotes(bookDir, toRelative)) {
+      pairs.push([`${fromRelative}/${now.slice(toRelative.length + 1)}`, now]);
+    }
+  } else if (NOTE_EXT.test(toRelative)) {
+    pairs.push([fromRelative, toRelative]);
+  }
+
+  const dirOf = (relative) => {
+    const cut = relative.lastIndexOf('/');
+    return cut === -1 ? '' : relative.slice(0, cut);
+  };
+
+  let changed = 0;
+  for (const [was, now] of pairs) {
+    try {
+      /* eslint-disable no-await-in-loop */
+      const file = safeJoin(bookDir, now);
+      const { html } = decodeBuffer(await fsp.readFile(file));
+      const next = rewriteLinks(html, dirOf(was), dirOf(now));
+      if (next === html) continue;
+      await writeFileAtomic(file, encodeDocument(next));
+      changed += 1;
+    } catch {
+      // Unreadable, or not UTF-8. The move stands.
+    }
+  }
+  return changed;
 }
 
 // Pasted images live in the book so they travel with the notes; the folder is
@@ -397,6 +463,8 @@ module.exports = {
   backupPath,
   BACKUP_DIR,
   moveItem,
+  relinkMoved,
+  listNotes,
   saveImage,
   validateName,
   remapPath,

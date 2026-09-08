@@ -20,7 +20,7 @@
     "dev": "concurrently -k \"vite\" \"wait-on tcp:127.0.0.1:5173 && electron . --dev\"",
     "build": "vite build",
     "start": "electron .",
-    "test": "node test/verify-save.js && node test/verify-write.js && node test/verify-organise.js && node test/verify-colors.js && node test/verify-search.js && node test/verify-seed.js && node test/verify-saving.js && node test/verify-update.js && node test/verify-config.js && node test/verify-datetime.js && node test/verify-wording.js && electron test/verify-ipc.js && electron test/verify-tray.js && electron test/verify-frame.js && electron test/verify-tree-dnd.js",
+    "test": "node test/verify-save.js && node test/verify-write.js && node test/verify-organise.js && node test/verify-links.js && node test/verify-colors.js && node test/verify-search.js && node test/verify-seed.js && node test/verify-saving.js && node test/verify-update.js && node test/verify-config.js && node test/verify-datetime.js && node test/verify-wording.js && electron test/verify-ipc.js && electron test/verify-tray.js && electron test/verify-frame.js && electron test/verify-tree-dnd.js",
     "dist": "npm run build && electron-builder",
     "test:installer": "node test/verify-installer.js"
   },
