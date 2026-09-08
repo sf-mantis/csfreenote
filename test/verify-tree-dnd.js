@@ -1980,6 +1980,195 @@ async function findInNote(win) {
 }
 
 /**
+ * Find and replace, in the note and in the source.
+ *
+ * Every replacement goes through execCommand('insertText'). The reason is the
+ * undo stack: editing the document directly is what once made Ctrl+Z put words
+ * back in the wrong places, so what matters here is not only that the text
+ * changes but that undoing walks back through it.
+ *
+ * 모두 바꾸기 runs from the last match to the first. Forwards, a replacement
+ * containing the search term feeds itself a new match forever, which is checked
+ * below by replacing 가 with 가가.
+ */
+async function replaceInNote(win) {
+  console.log('\n■ 찾아바꾸기');
+
+  // 뒤따르는 검사는 여기 남은 문서에 의지한다 (표와 <font> 가 있는 것).
+  // 세 번 갈아치우므로 붙잡아 두었다가 나갈 때 돌려놓는다.
+  const original = await win.webContents.executeJavaScript('window.__doc', true);
+
+  const r = await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const pick = (m) => [...document.querySelectorAll('.mode-btn')].find(b => b.dataset.mode === m);
+    const text = () => document.getElementById('noteFrame').contentDocument.body.textContent;
+
+    window.__doc = '<html><head><title>t</title></head><body>'
+      + '<p>사과 하나 사과 둘</p><p>배 하나 사과 셋</p></body></html>';
+    window.__mtime += 1;
+    pick('browse').click();
+    await wait(200);
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(400);
+
+    const bar = document.getElementById('findBar');
+    const find = document.getElementById('findInput');
+    const swap = document.getElementById('replaceInput');
+    const one = document.getElementById('replaceOne');
+    const all = document.getElementById('replaceAll');
+    const count = () => document.getElementById('findCount').textContent;
+    const shown = (node) => !node.classList.contains('hidden');
+
+    // 보기 모드에서는 바꾸기를 내주지 않는다
+    document.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(200);
+    const browseHides = !shown(swap) && !shown(one) && !shown(all);
+    const barOpen = !bar.classList.contains('hidden');
+
+    // 편집 모드로 가면 그대로 나타난다
+    pick('edit').click();
+    await wait(300);
+    const editShows = shown(swap) && shown(one) && shown(all);
+
+    // 한 자리만 바꾼다
+    find.value = '사과';
+    find.dispatchEvent(new Event('input', { bubbles: true }));
+    find.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'Enter', bubbles: true, cancelable: true }));
+    await wait(250);
+    const foundThree = count();
+
+    swap.value = '포도';
+    one.click();
+    await wait(350);
+    const afterOne = text();
+
+    // 남은 것을 모두 바꾼다
+    all.click();
+    await wait(500);
+    const afterAll = text();
+    const allCount = count();
+
+    // 되돌리기가 바꾼 것을 거꾸로 밟는다
+    const d = document.getElementById('noteFrame').contentDocument;
+    d.body.focus();
+    d.execCommand('undo');
+    await wait(200);
+    const afterUndo = text();
+
+    return {
+      barOpen, browseHides, editShows, foundThree,
+      afterOne, afterAll, allCount, afterUndo,
+    };
+  })()`, true);
+
+  ok('보기 모드에서도 Ctrl-H 로 찾기는 열림', r.barOpen);
+  ok('보기 모드에서는 바꾸기를 내주지 않음', r.browseHides);
+  ok('편집 모드에서는 바꾸기가 나타남', r.editShows);
+  ok('세 자리를 찾음', r.foundThree === '1 / 3', r.foundThree);
+  ok('바꾸기가 한 자리만 바꿈',
+    (r.afterOne.match(/포도/g) || []).length === 1
+    && (r.afterOne.match(/사과/g) || []).length === 2, r.afterOne);
+  ok('모두가 남은 자리를 다 바꿈', !r.afterAll.includes('사과'), r.afterAll);
+  ok('바꾼 개수를 알려줌', r.allCount === '2곳 바꿈', r.allCount);
+  ok('다른 글자는 그대로', r.afterAll.includes('배 하나'), r.afterAll);
+  ok('되돌리기가 한 걸음 물러남',
+    r.afterUndo !== r.afterAll && r.afterUndo.includes('사과'), r.afterUndo);
+
+  // 바꿀 말이 찾는 말을 품고 있어도 끝난다 — 앞에서 뒤로 돌면 영원히 돈다
+  const grow = await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const pick = (m) => [...document.querySelectorAll('.mode-btn')].find(b => b.dataset.mode === m);
+    const text = () => document.getElementById('noteFrame').contentDocument.body.textContent;
+
+    pick('browse').click();
+    // 앞 검사가 남긴 저장이 __doc 을 덮은 뒤에 새 문서를 놓는다
+    await wait(700);
+    window.__doc = '<html><head><title>t</title></head><body><p>가 나 가 다 가</p></body></html>';
+    window.__mtime += 1;
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(400);
+    pick('edit').click();
+    await wait(300);
+
+    document.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(200);
+    document.getElementById('findInput').value = '가';
+    document.getElementById('replaceInput').value = '가가';
+
+    const started = Date.now();
+    document.getElementById('replaceAll').click();
+    await wait(700);
+    return { ms: Date.now() - started, out: text(),
+      count: document.getElementById('findCount').textContent };
+  })()`, true);
+
+  ok('바꿀 말이 찾는 말을 품어도 끝난다', grow.ms < 700 * 3, `${grow.ms}ms`);
+  ok('세 자리가 각각 한 번만 늘어남',
+    grow.out.replace(/\s/g, '') === '가가나가가다가가', grow.out);
+  ok('세 곳으로 셈', grow.count === '3곳 바꿈', grow.count);
+
+  // 소스 모드에서도 바꾸고, 그것이 파일에 남는다
+  const source = await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const pick = (m) => [...document.querySelectorAll('.mode-btn')].find(b => b.dataset.mode === m);
+
+    pick('browse').click();
+    // 앞 검사가 남긴 저장이 __doc 을 덮은 뒤에 새 문서를 놓는다
+    await wait(700);
+    window.__doc = '<html><head><title>t</title></head><body><p>낡은 말</p></body></html>';
+    window.__mtime += 1;
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(400);
+    pick('source').click();
+    await wait(400);
+
+    document.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(200);
+    const shownHere = !document.getElementById('replaceInput').classList.contains('hidden');
+
+    document.getElementById('findInput').value = '낡은';
+    document.getElementById('replaceInput').value = '새로운';
+    document.getElementById('replaceAll').click();
+    await wait(1400);
+
+    return {
+      shownHere,
+      editor: document.getElementById('sourceEditor').value,
+      saved: String(window.__doc),
+    };
+  })()`, true);
+
+  ok('소스 모드에서도 바꾸기가 나타남', source.shownHere);
+  ok('소스 편집기의 글자가 바뀜',
+    source.editor.includes('새로운 말') && !source.editor.includes('낡은'), source.editor);
+  ok('바꾼 것이 파일에 남음',
+    source.saved.includes('새로운 말') && !source.saved.includes('낡은'),
+    source.saved.slice(0, 120));
+  ok('문서 나머지는 그대로', source.saved.includes('<title>t</title>'));
+
+  // 뒷정리. 고친 노트를 소스 모드에 그대로 두고 나가면, 다음 검사가 놓아둔
+  // window.__doc 을 이 노트의 저장이 덮어써서 엉뚱한 문서를 보게 된다.
+  await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    [...document.querySelectorAll('.mode-btn')]
+      .find(b => b.dataset.mode === 'browse').click();
+    await wait(900);
+    window.__doc = ${JSON.stringify(original)};
+    window.__mtime += 1;
+  })()`, true);
+}
+
+/**
  * The dark rendering must map the note's own colours, follow the single theme
  * control, and never reach the file.
  */
@@ -2615,6 +2804,7 @@ app.whenReady().then(async () => {
   await f2RenamesWhateverIsSelected(win);
   await idleSpansLeaveTheFileNotTheEditor(win);
   await findInNote(win);
+  await replaceInNote(win);
   await darkNoteSurface(win);
 
   await statusBar(win);

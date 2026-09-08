@@ -56,6 +56,7 @@ Windows용 Electron 앱이다.
 | `Delete` | 삭제 (휴지통으로) |
 | `Ctrl` `S` | 저장 |
 | `Ctrl` `F` | 이 노트에서 찾기 |
+| `Ctrl` `H` | 이 노트에서 찾아 바꾸기 |
 | `Ctrl` `Shift` `D` | 본문 검색 (노트책 전체) |
 | `Ctrl` `Shift` `V` | 서식 없이 붙여넣기 |
 | `Ctrl` `D` | 탐색기에서 이 노트 보기 |

@@ -113,6 +113,9 @@ const el = {
   sourceMark: document.getElementById('sourceMark'),
   findInput: document.getElementById('findInput'),
   findCount: document.getElementById('findCount'),
+  replaceInput: document.getElementById('replaceInput'),
+  replaceOne: document.getElementById('replaceOne'),
+  replaceAll: document.getElementById('replaceAll'),
   formatBar: document.getElementById('formatBar'),
   tableHandles: document.getElementById('tableHandles'),
   rowInsert: document.getElementById('rowInsert'),
@@ -455,6 +458,8 @@ async function applyMode(mode) {
 
   const editable = mode === 'edit';
   el.formatBar.classList.toggle('disabled', !editable);
+  // 모드가 바뀌면 바꾸기 단추가 따라 숨거나 돌아온다.
+  showReplace();
   el.sourceEditor.classList.toggle('hidden', mode !== 'source');
   el.frame.classList.toggle('hidden', mode === 'source');
   applyEditableState();
@@ -532,7 +537,7 @@ function prompt(title, value = '') {
  * Separate from Ctrl-Shift-D, which reads every note in the folder. This one
  * reads the note in front of you.
  */
-const findState = { query: '', hits: 0, at: 0, ticket: 0 };
+const findState = { query: '', hits: 0, at: 0, ticket: 0, replacing: false, replaceWanted: false };
 
 const findInSource = () => state.mode === 'source';
 
@@ -541,13 +546,35 @@ function closeFind() {
   el.findCount.textContent = '';
   findState.query = '';
   findState.at = 0;
+  showReplace(false);
   clearNoteHighlight();
   hideSourceMark();
 }
 
-function openFind() {
+/**
+ * Show or hide the replace half of the bar.
+ *
+ * Only where a note can actually be changed. Offering to replace in browse
+ * mode would be offering something that cannot happen — the document is not
+ * editable there, and execCommand would simply refuse.
+ *
+ * What the user asked for and what the mode allows are kept apart, so moving
+ * to browse mode and back brings the row the user opened back with it.
+ * Called with nothing to re-apply that after a mode change.
+ */
+function showReplace(on) {
+  if (on !== undefined) findState.replaceWanted = on;
+  const can = findState.replaceWanted && (state.mode === 'edit' || state.mode === 'source');
+  for (const node of [el.replaceInput, el.replaceOne, el.replaceAll]) {
+    node.classList.toggle('hidden', !can);
+  }
+  findState.replacing = can;
+}
+
+function openFind({ replace } = {}) {
   if (!state.currentPath) return;
   el.findBar.classList.remove('hidden');
+  showReplace(replace);
   const editor = el.sourceEditor;
   const picked = findInSource()
     ? editor.value.slice(editor.selectionStart, editor.selectionEnd) : '';
@@ -812,6 +839,125 @@ function runFind(step) {
   paintMatches(ranges, findState.at - 1);
   scrollNoteTo(ranges[findState.at - 1]);
   el.findCount.textContent = `${findState.at} / ${ranges.length}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Replace
+ *
+ * Every replacement goes through execCommand('insertText'). Editing the
+ * document directly would be shorter and is the reason this project has been
+ * bitten twice: the browser's undo remembers the edits it made, so when the
+ * text underneath has moved since, Ctrl+Z puts words back in the wrong
+ * places. If the command is refused, nothing is written — a refusal is not an
+ * invitation to reach into the DOM.
+ *
+ * Undo is therefore one step per replacement. There is no way to fold several
+ * execCommand calls into one, and a wrong undo is worse than a long one.
+ * ------------------------------------------------------------------ */
+
+/** Put the replacement in at `range`, the way a person typing would. */
+function typeOver(range, text) {
+  const view = frameDoc && frameDoc.defaultView;
+  if (!view) return false;
+  // execCommand needs the frame to hold the focus, and the caret to be where
+  // the edit goes. Done on a button press only: doing it per keystroke is how
+  // Korean input lost its first consonant and a backspace ate the note.
+  frameDoc.body.focus();
+  const selection = view.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return frameDoc.execCommand('insertText', false, text) === true;
+}
+
+/** The same, in the source textarea, so its own undo keeps working. */
+function typeOverSource(index, length, text) {
+  const editor = el.sourceEditor;
+  editor.focus();
+  editor.setSelectionRange(index, index + length);
+  return document.execCommand('insertText', false, text) === true;
+}
+
+/**
+ * Replace the match the user is looking at, then move to the next one.
+ *
+ * Nothing happens without a current match: 바꾸기 pressed on an empty search
+ * would otherwise change whatever the caret happened to be near.
+ */
+function replaceCurrent() {
+  const query = el.findInput.value;
+  const text = el.replaceInput.value;
+  if (!query || !findState.replacing) return;
+
+  if (findInSource()) {
+    const spots = sourceMatches(query);
+    if (!spots.length || !findState.at) { runFind(1); return; }
+    const at = spots[Math.min(findState.at, spots.length) - 1];
+    if (!typeOverSource(at, query.length, text)) {
+      showToast('바꾸지 못했습니다.');
+      return;
+    }
+    state.dirty = true;
+    scheduleSave();
+    // The text moved, so the count and the mark are both stale.
+    findState.at = Math.max(0, findState.at - 1);
+    el.findInput.focus();
+    runFind(1);
+    return;
+  }
+
+  const ranges = noteMatches(query);
+  if (!ranges.length || !findState.at) { runFind(1); return; }
+  const range = ranges[Math.min(findState.at, ranges.length) - 1];
+  if (!typeOver(range, text)) {
+    showToast('바꾸지 못했습니다. 편집 모드인지 확인해 주십시오.');
+    return;
+  }
+  findState.at = Math.max(0, findState.at - 1);
+  el.findInput.focus();
+  runFind(1);
+}
+
+/**
+ * Replace every match.
+ *
+ * Last match first. A replacement changes the text after it and nothing
+ * before, so the earlier ranges stay where they were — and a replacement that
+ * contains what was searched for ("가" for "가가") cannot feed itself a new
+ * match to find, which a forwards loop would chase forever.
+ */
+function replaceEvery() {
+  const query = el.findInput.value;
+  const text = el.replaceInput.value;
+  if (!query || !findState.replacing) return;
+
+  let done = 0;
+  let refused = false;
+
+  if (findInSource()) {
+    const spots = sourceMatches(query);
+    for (let i = spots.length - 1; i >= 0; i -= 1) {
+      if (!typeOverSource(spots[i], query.length, text)) { refused = true; break; }
+      done += 1;
+    }
+    if (done) {
+      state.dirty = true;
+      scheduleSave();
+    }
+  } else {
+    const ranges = noteMatches(query);
+    for (let i = ranges.length - 1; i >= 0; i -= 1) {
+      if (!typeOver(ranges[i], text)) { refused = true; break; }
+      done += 1;
+    }
+  }
+
+  findState.at = 0;
+  el.findInput.focus();
+  clearNoteHighlight();
+  hideSourceMark();
+  el.findCount.textContent = done ? `${done}곳 바꿈` : '없음';
+  if (refused) showToast(`${done}곳까지 바꾸고 멈췄습니다.`);
+  else if (done) showToast(`${done}곳을 바꿨습니다. 되돌리기는 ${done}번입니다.`, 'notice');
 }
 
 /* ------------------------------------------------------------------ *
@@ -3368,6 +3514,15 @@ function bindEvents() {
   document.getElementById('findNext').addEventListener('click', () => runFind(1));
   document.getElementById('findPrev').addEventListener('click', () => runFind(-1));
   document.getElementById('findClose').addEventListener('click', closeFind);
+  el.replaceOne.addEventListener('click', replaceCurrent);
+  el.replaceAll.addEventListener('click', replaceEvery);
+  el.replaceInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); closeFind(); return; }
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) replaceEvery();
+    else replaceCurrent();
+  });
 
   el.colGrip.addEventListener('mouseenter', keepTableHandles);
   el.colGrip.addEventListener('mouseleave', scheduleHideTableHandles);
@@ -3489,6 +3644,11 @@ function handleShortcut(event) {
     if (mod && (key === 'F' || key === 'f') && !event.shiftKey) {
       event.preventDefault();
       openFind();
+      return;
+    }
+    if (mod && (key === 'H' || key === 'h')) {
+      event.preventDefault();
+      openFind({ replace: true });
       return;
     }
     if (mod && (key === 'S' || key === 's')) {
