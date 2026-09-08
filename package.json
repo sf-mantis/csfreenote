@@ -1,0 +1,78 @@
+{
+  "name": "csfreenote",
+  "version": "1.2.0",
+  "description": "csFreeNote - 내 PC 안에 두고 쓰는 HTML 노트 프로그램",
+  "main": "electron/main.js",
+  "author": {
+    "name": "sf-mantis"
+  },
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:127.0.0.1:5173 && electron . --dev\"",
+    "build": "vite build",
+    "start": "electron .",
+    "test": "node test/verify-save.js && node test/verify-write.js && node test/verify-organise.js && node test/verify-colors.js && node test/verify-search.js && node test/verify-seed.js && node test/verify-saving.js && node test/verify-config.js && node test/verify-datetime.js && node test/verify-wording.js && electron test/verify-ipc.js && electron test/verify-tray.js && electron test/verify-frame.js && electron test/verify-tree-dnd.js",
+    "dist": "npm run build && electron-builder",
+    "test:installer": "node test/verify-installer.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "io.github.sf-mantis.csfreenote",
+    "productName": "csFreeNote",
+    "extraMetadata": {
+      "description": "csFreeNote"
+    },
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "BookData",
+        "to": "BookData"
+      },
+      {
+        "from": "csTemplate",
+        "to": "csTemplate"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "${productName}-${version}-setup.${ext}",
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "csFreeNote",
+      "uninstallDisplayName": "csFreeNote ${version}",
+      "include": "build/installer.nsh"
+    },
+    "electronLanguages": [
+      "ko",
+      "en-US"
+    ],
+    "copyright": "Copyright © 2026 sf-mantis"
+  }
+}

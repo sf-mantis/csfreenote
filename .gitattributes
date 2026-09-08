@@ -1,0 +1,9 @@
+# Keep line endings stable across machines.
+* text=auto eol=lf
+
+*.ico binary
+*.png binary
+*.woff2 binary
+*.htm text eol=lf
+*.html text eol=lf
+*.ps1 text eol=crlf

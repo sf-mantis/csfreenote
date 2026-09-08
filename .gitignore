@@ -1,0 +1,21 @@
+node_modules/
+dist/
+release/
+
+# runtime state (window bounds, last page, theme)
+csFreeNote.ini
+csFreeNote.json
+
+# note backups
+*.orig
+*.bak
+
+# runtime scratch
+temp/
+
+# note backups and generated images
+_backup/
+_images/
+
+# 개발 일지 — 사내 노트 이름이 들어 있어 저장소에 두지 않는다
+WORKLOG.md

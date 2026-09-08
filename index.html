@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: file:; script-src 'self'; connect-src 'none'" />
+  <title>csFreeNote</title>
+
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body data-theme="dark">
+  <div id="app">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-mark">cs</span>
+          <span class="brand-name">FreeNote</span>
+        </div>
+        <div class="sidebar-actions">
+          <button type="button" id="btnFolder" class="icon-btn" title="폴더 만들기 (Ctrl+Shift+Insert)">📁+</button>
+          <button type="button" id="btnNote" class="icon-btn" title="노트 만들기 (Ctrl+Insert)">📝+</button>
+          <button type="button" id="btnRefresh" class="icon-btn" title="새로고침">↻</button>
+          <button type="button" id="btnHideTree" class="icon-btn" title="트리 감추기 (Esc)">«</button>
+        </div>
+      </div>
+      <div class="book-bar">
+        <button type="button" id="btnBookDir" class="book-dir" title="노트 폴더 (환경설정)">기본 폴더</button>
+        <button type="button" id="btnSearch" class="icon-btn" title="검색 (Ctrl+Shift+D)">⌕</button>
+        <button type="button" id="btnReveal" class="icon-btn" title="탐색기에서 열기 (Ctrl+D)">📂</button>
+      </div>
+
+      <div id="searchPanel" class="search-panel hidden">
+        <input id="searchInput" type="search" placeholder="노트 검색…" autocomplete="off" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+      <nav id="tree" class="tree" aria-label="노트 트리"></nav>
+    </aside>
+
+    <div id="resizeHandle" class="resize-handle" title="너비 조절"></div>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="mode-group" role="tablist">
+          <button type="button" class="mode-btn active" data-mode="browse" title="보기 모드 — 읽기만 합니다">보기</button>
+          <button type="button" class="mode-btn" data-mode="edit" title="편집 모드 — 그 자리에서 고칩니다">편집</button>
+          <button type="button" class="mode-btn" data-mode="source" title="소스 모드 — 파일의 HTML을 봅니다">소스</button>
+        </div>
+
+        <div id="formatBar" class="format-bar disabled">
+          <button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>
+          <button type="button" data-cmd="strike" title="취소선"><s>S</s></button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="h1" title="제목1">H1</button>
+          <button type="button" data-cmd="h2" title="제목2">H2</button>
+          <button type="button" data-cmd="bullet" title="글머리">•</button>
+          <button type="button" data-cmd="ordered" title="번호">1.</button>
+          <button type="button" data-cmd="quote" title="인용">❝</button>
+          <button type="button" data-cmd="hr" title="구분선">―</button>
+          <button type="button" data-cmd="table" title="표 만들기" aria-haspopup="true" aria-expanded="false">▦</button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="alignLeft" title="왼쪽">⫷</button>
+          <button type="button" data-cmd="alignCenter" title="가운데">☰</button>
+          <button type="button" data-cmd="alignRight" title="오른쪽">⫸</button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="datetime" title="날짜와 시각 넣기 (F5)">🕘</button>
+          <button type="button" data-cmd="link" title="링크">🔗</button>
+          <button type="button" data-cmd="undo" title="실행취소">↶</button>
+          <button type="button" data-cmd="redo" title="다시실행">↷</button>
+        </div>
+
+        <div id="tableGrid" class="table-grid hidden" role="dialog" aria-label="표 크기 고르기">
+          <div id="tableGridCells" class="table-grid-cells"></div>
+          <div id="tableGridLabel" class="table-grid-label">칸을 짚어 크기를 고르세요</div>
+        </div>
+
+        <div class="toolbar-right">
+          <span id="saveStatus" class="save-status">준비됨</span>
+          <button type="button" id="btnSettings" class="icon-btn" title="환경설정">⚙</button>
+          <button type="button" id="btnTheme" class="icon-btn" title="테마 전환">☾</button>
+          <button type="button" id="btnShowTree" class="icon-btn hidden" title="트리 보이기">»</button>
+        </div>
+      </header>
+
+      <div class="editor-wrap">
+        <div id="emptyState" class="empty-state">
+          <h1>csFreeNote</h1>
+          <p>왼쪽 트리에서 노트를 선택하거나<br />Ctrl+Insert로 새 노트를 만드세요.</p>
+          <ul>
+            <li><kbd>Ctrl</kbd>+<kbd>Insert</kbd> 새 노트</li>
+            <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Insert</kbd> 새 폴더</li>
+            <li><kbd>F2</kbd> 이름 변경 · <kbd>Esc</kbd> 트리 감추기</li>
+          </ul>
+        </div>
+
+        <div id="editorRoot" class="editor-root hidden">
+          <div id="findBar" class="find-bar hidden">
+            <input id="findInput" type="text" placeholder="이 노트에서 찾기…" autocomplete="off" />
+            <span id="findCount" class="find-count"></span>
+            <button type="button" id="findPrev" title="이전 (Shift+Enter)">↑</button>
+            <button type="button" id="findNext" title="다음 (Enter)">↓</button>
+            <button type="button" id="findClose" title="닫기 (Esc)">✕</button>
+          </div>
+          <div id="titleBar" class="title-bar">
+            <span id="noteTitle" class="note-title">노트</span>
+            <span id="notePath" class="note-path"></span>
+          </div>
+          <iframe id="noteFrame" class="note-frame" title="노트 내용"
+                  sandbox="allow-same-origin"></iframe>
+          <textarea id="sourceEditor" class="source-editor hidden" spellcheck="false"></textarea>
+          <div id="sourceMark" class="source-mark"></div>
+        </div>
+      </div>
+
+      <footer id="statusBar" class="status-bar">
+        <span id="statusPath" class="status-path" title=""></span>
+        <span class="status-spacer"></span>
+        <span id="statusMeta" class="status-meta"></span>
+      </footer>
+    </main>
+  </div>
+
+  <div id="settings" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="settings-card">
+      <h2 id="settingsTitle">환경설정</h2>
+
+      <section class="settings-section">
+        <div class="settings-head">
+          <h3>노트 폴더</h3>
+          <div class="settings-head-actions">
+            <button type="button" id="bookUp" class="icon-btn" title="위로">▲</button>
+            <button type="button" id="bookDown" class="icon-btn" title="아래로">▼</button>
+            <button type="button" id="bookAdd">추가</button>
+            <button type="button" id="bookEdit">수정</button>
+            <button type="button" id="bookRemove">삭제</button>
+          </div>
+        </div>
+        <div id="bookList" class="book-list" role="listbox" aria-label="노트 폴더 목록"></div>
+        <p class="settings-hint">두 번 눌러 그 폴더를 엽니다. 삭제는 목록에서만 지우고 노트는 그대로 둡니다.</p>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-head">
+          <h3>글자 서식</h3>
+          <div class="settings-head-actions">
+            <button type="button" id="formatsReset">기본값으로</button>
+          </div>
+        </div>
+        <div id="formatList" class="format-list"></div>
+        <p class="settings-hint">편집 모드에서 글을 선택하고 Ctrl-1 … Ctrl-9를 누르면 적용됩니다. 비워 둔 항목은 건드리지 않습니다.</p>
+      </section>
+
+      <section class="settings-section">
+        <h3>동작</h3>
+        <div class="settings-grid">
+          <label for="setStartMode">노트를 열 때</label>
+          <select id="setStartMode">
+            <option value="browse">보기 모드로</option>
+            <option value="edit">편집 모드로</option>
+          </select>
+
+          <label for="setAutosave">자동 저장 간격</label>
+          <div class="settings-inline">
+            <input id="setAutosave" type="number" min="0.3" max="600" step="0.1" />
+            <span>초</span>
+          </div>
+
+          <label for="setSearchScope">검색 범위</label>
+          <select id="setSearchScope">
+            <option value="folder">선택한 폴더 안에서</option>
+            <option value="book">노트 폴더 전체에서</option>
+          </select>
+
+          <label for="setDateFormat">날짜·시각 형식</label>
+          <div class="settings-inline">
+            <input id="setDateFormat" type="text" spellcheck="false" />
+            <span id="dateFormatPreview" class="settings-preview"></span>
+          </div>
+
+          <label for="setStartAs">창을 열 때</label>
+          <select id="setStartAs">
+            <option value="restore">지난번 크기로</option>
+            <option value="maximized">최대 크기로</option>
+          </select>
+        </div>
+
+        <label class="settings-check">
+          <input id="setReturnToBrowse" type="checkbox" />
+          <span>다른 노트로 옮기면 보기 모드로 돌아가기</span>
+        </label>
+
+        <label class="settings-check">
+          <input id="setTableEditing" type="checkbox" />
+          <span>표 편집 모드 사용 (행/열 추가 및 삭제)</span>
+        </label>
+
+        <label class="settings-check">
+          <input id="setMinimizeToTray" type="checkbox" />
+          <span>최소화하면 알림 영역으로 보내기</span>
+        </label>
+        <p class="settings-hint">꺼두면 최소화는 평소대로 동작합니다. 켜면 작업 표시줄에서 사라지고 시계 옆 아이콘으로 들어갑니다.</p>
+      </section>
+
+      <div class="modal-actions">
+        <button type="button" id="settingsClose">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <h2 id="modalTitle">입력</h2>
+      <input id="modalInput" type="text" />
+      <div class="modal-actions">
+        <button type="button" id="modalCancel">취소</button>
+        <button type="button" id="modalOk" class="primary">확인</button>
+      </div>
+    </div>
+  </div>
+
+
+<div id="tableHandles" class="table-handles hidden">
+  <button type="button" id="rowInsert" class="table-handle" title="여기에 행 넣기">+</button>
+  <button type="button" id="colInsert" class="table-handle" title="여기에 열 넣기">+</button>
+  <button type="button" id="rowRemove" class="table-handle minus" title="이 행 지우기">−</button>
+  <button type="button" id="colRemove" class="table-handle minus" title="이 열 지우기">−</button>
+  <div id="colGrip" class="col-grip" title="끌어서 열 너비 조정"></div>
+</div>
+
+</body>
+</html>
