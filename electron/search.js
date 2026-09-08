@@ -3,11 +3,11 @@
 /**
  * Full-text search over a book.
  *
- * Every keystroke used to re-read and re-decode every note — 11 MB of parsing
- * for a book of 74. The expensive part is turning a file into plain text, and
- * that only changes when the file does, so it is cached against the file's
- * mtime and size. Later searches stat each note and scan strings already in
- * memory.
+ * Every keystroke used to re-read and re-decode every note in the book, which
+ * is megabytes of parsing for a folder of any size. The expensive part is
+ * turning a file into plain text, and that only changes when the file does, so
+ * it is cached against the file's mtime and size. Later searches stat each
+ * note and scan strings already in memory.
  *
  * Free of Electron so the verification harness runs the same code the app does.
  */
