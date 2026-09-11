@@ -266,6 +266,21 @@ electron-builder + NSIS. 사용자별 설치(`perMachine: false`)라 관리자 �
 `update.check` 로 끌 수 있다 (설정 창). 패키징되지 않은 앱에서는 확인하지 않는다 —
 `package.json` 의 버전이 작업 트리 사정에 따라 아무 값이나 되기 때문이다.
 
+## 제거할 때 남는 것
+
+`build/installer.nsh` 가 설치 폴더를 다룬다 — 노트·양식·설정을 옮겨두고 지우고
+되돌린다. 업그레이드면 묻지 않고 남긴다 (`isUpdated`).
+
+설치 폴더 말고 한 군데가 더 있다. Electron 이 `%APPDATA%\csfreenote` 에 캐시와
+맞춤법 사전을 수십 MB 쌓는데, 프로그램이 고른 자리가 아니고 제거해도 남아 있었다.
+이제 그 찌꺼기를 **이름을 하나씩 대어** 지운다.
+
+- **폴더째 `RMDir /r` 을 걸지 않는다.** 그 자리는 exe 옆이 쓰기 불가일 때 프로그램이
+  물러서는 곳이라, `C:\Program Files` 에 깔린 누군가에게는 **거기가 노트 자리다**
+- `BookData`·`csTemplate`·설정 파일의 이름은 그 목록에 없다. 그러니 이 부분이
+  틀려도 노트에는 닿을 수 없다
+- `verify-installer.js` 가 설치 없이 그 성질을 읽어서 확인한다 — 이름을 대는지,
+  사람 것을 대지 않는지, 폴더를 통째로 지우지 않는지
 ## 데이터 위치
 
 - 배포본 — **exe 옆**의 `BookData` / `csTemplate` / `temp` / `csFreeNote.json`.

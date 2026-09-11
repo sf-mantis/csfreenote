@@ -58,4 +58,31 @@ $INSTDIR$\r$\n$\r$\n\
     ; If there was nothing to keep, do not leave an empty folder behind.
     RMDir "$INSTDIR"
   ${endIf}
+
+  ; Chromium's own scratch, in $APPDATA\csFreeNote, which the program never
+  ; chose and the uninstaller was leaving behind — tens of megabytes of cache
+  ; and spellchecking dictionaries after everything else had gone.
+  ;
+  ; Named one by one, never RMDir /r on the folder itself. That folder is where
+  ; the program falls back to when the place beside the executable cannot be
+  ; written to, so for somebody who installed under Program Files it holds
+  ; their notes. BookData, csTemplate and the settings are not named here, and
+  ; so cannot be reached even if this is wrong.
+  RMDir /r "$APPDATA\${APP_FILENAME}\Cache"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Code Cache"
+  RMDir /r "$APPDATA\${APP_FILENAME}\GPUCache"
+  RMDir /r "$APPDATA\${APP_FILENAME}\DawnGraphiteCache"
+  RMDir /r "$APPDATA\${APP_FILENAME}\DawnWebGPUCache"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Dictionaries"
+  RMDir /r "$APPDATA\${APP_FILENAME}\blob_storage"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Local Storage"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Session Storage"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Network"
+  RMDir /r "$APPDATA\${APP_FILENAME}\SharedStorage"
+  RMDir /r "$APPDATA\${APP_FILENAME}\Shared Dictionary"
+  Delete "$APPDATA\${APP_FILENAME}\Local State"
+  Delete "$APPDATA\${APP_FILENAME}\Preferences"
+  ; Only if nothing of the user's was in there. RMDir without /r refuses a
+  ; folder that still holds something.
+  RMDir "$APPDATA\${APP_FILENAME}"
 !macroend

@@ -313,6 +313,24 @@ function registry(action) {
  */
 function main() {
   refuseToEatNotes();
+  // Read before anything is installed. The uninstaller names Chromium's own
+  // leavings under $APPDATA so they do not outlive the program, and what
+  // matters is what it does not name: that folder is where the program falls
+  // back to when the place beside the executable cannot be written to, so for
+  // somebody who installed under Program Files it holds their notes.
+  const macro = fs.readFileSync(path.join(ROOT, 'build', 'installer.nsh'), 'utf8');
+  const appdata = macro.split(/\r?\n/).filter((l) => l.includes('$APPDATA'));
+  const NOTES = /BookData|csTemplate|csFreeNote\.(json|ini)/;
+
+  ok('$APPDATA 쪽 찌꺼기를 치우기는 한다', appdata.length > 0, String(appdata.length));
+  ok('노트·양식·설정의 이름은 대지 않는다',
+    !appdata.some((l) => NOTES.test(l)),
+    appdata.filter((l) => NOTES.test(l)).join(' / '));
+  // RMDir /r on the folder itself would take everything in it, named or not.
+  ok('그 폴더 자체를 재귀로 지우지 않는다',
+    !appdata.some((l) => /RMDir\s+\/r\s+"?\$APPDATA[^"]*\$\{APP_FILENAME\}"?\s*$/.test(l)),
+    appdata.filter((l) => /RMDir\s+\/r/.test(l)).length + '건');
+
   if (!fs.existsSync(SETUP)) {
     console.log(`설치 파일이 없습니다: ${SETUP}`);
     console.log('먼저 npm run dist 를 실행하세요.');
