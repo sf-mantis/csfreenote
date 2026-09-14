@@ -317,6 +317,28 @@ function clearApp() {
     '-File', path.join(__dirname, 'support', 'forget-install.ps1')], { stdio: 'ignore' });
 }
 
+/**
+ * Where Chromium keeps its own scratch, whatever folder the program sits in.
+ *
+ * Reading the macro proves which names it dares to say. It does not prove the
+ * names are right: SharedStorage was named under RMDir /r for a whole release
+ * because it looks like the folders around it, and RMDir does not touch a
+ * file, so a real uninstall left it — and the folder with it. Only an actual
+ * uninstall settles that, so one of the scenarios below looks at the disk.
+ */
+const scratchDir = () => path.join(process.env.APPDATA || '', 'csFreeNote');
+
+/**
+ * Does that folder hold somebody's notes?
+ *
+ * It is also where the program falls back to when the place beside the
+ * executable cannot be written to. On such a machine the folder must survive
+ * the uninstall, so expecting it to disappear would be wrong — say so rather
+ * than fail, and never delete to make the check pass.
+ */
+const scratchHoldsNotes = () => ['BookData', 'csTemplate', 'csFreeNote.json']
+  .some((name) => fs.existsSync(path.join(scratchDir(), name)));
+
 const programFiles = () => (fs.existsSync(APP) ? fs.readdirSync(APP) : [])
   .filter((f) => /\.(dll|pak|bin|dat)$/i.test(f) || f === 'csFreeNote.exe');
 
@@ -506,6 +528,10 @@ function run() {
   install();
   addUserData();
   killApp();
+  // install() 이 앱을 한 번 띄웠으므로 Chromium 의 찌꺼기가 놓여 있어야 한다.
+  // 없다면 그 뒤의 "사라졌다" 는 아무것도 증명하지 않는다.
+  const scratchStood = fs.existsSync(scratchDir());
+  const notesLiveThere = scratchHoldsNotes();
   execFileSync(UNINSTALL, ['/S', '/currentuser', '/DELETEDATA'], { stdio: 'ignore' });
   waitForUninstall();
 
@@ -513,6 +539,14 @@ function run() {
   ok('노트까지 모두 사라짐',
     !fs.existsSync(path.join(APP, 'BookData')) && !fs.existsSync(path.join(APP, 'csFreeNote.json')),
     left.join(', '));
+
+  ok('Chromium 찌꺼기가 실제로 놓여 있었다', scratchStood, scratchDir());
+  if (notesLiveThere) {
+    console.log('  건너뜀  이 기계는 그 폴더에 노트를 두고 있어 남는 것이 옳다');
+  } else {
+    const scraps = fs.existsSync(scratchDir()) ? fs.readdirSync(scratchDir()) : [];
+    ok('Chromium 찌꺼기도 실제로 사라졌다', scraps.length === 0, scraps.join(', '));
+  }
 
   console.log('\n■ 물어봤을 때 아니요를 누르면 노트는 남는다');
   clearApp();

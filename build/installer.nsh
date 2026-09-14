@@ -163,10 +163,17 @@ $INSTDIR$\r$\n$\r$\n\
   RMDir /r "$APPDATA\${APP_FILENAME}\Local Storage"
   RMDir /r "$APPDATA\${APP_FILENAME}\Session Storage"
   RMDir /r "$APPDATA\${APP_FILENAME}\Network"
-  RMDir /r "$APPDATA\${APP_FILENAME}\SharedStorage"
   RMDir /r "$APPDATA\${APP_FILENAME}\Shared Dictionary"
+  ; The rest are files, not folders. SharedStorage was in the list above until
+  ; a real uninstall left it sitting there: RMDir does not touch a file, so it
+  ; stayed, and the folder could not be removed because it was not empty.
+  ; What is here was read off a machine after running the program, not guessed.
   Delete "$APPDATA\${APP_FILENAME}\Local State"
   Delete "$APPDATA\${APP_FILENAME}\Preferences"
+  Delete "$APPDATA\${APP_FILENAME}\SharedStorage"
+  Delete "$APPDATA\${APP_FILENAME}\SharedStorage-wal"
+  Delete "$APPDATA\${APP_FILENAME}\SharedStorage-journal"
+  Delete "$APPDATA\${APP_FILENAME}\lockfile"
   ; Only if nothing of the user's was in there. RMDir without /r refuses a
   ; folder that still holds something.
   RMDir "$APPDATA\${APP_FILENAME}"
