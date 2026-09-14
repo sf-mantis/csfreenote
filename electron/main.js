@@ -45,6 +45,8 @@ function forgetSearchEntry(relativePath) {
 let mainWindow = null;
 let tray = null;
 let closing = false;
+// The last PDF this process wrote, so opening it needs no path from the renderer.
+let lastPdf = null;
 function appRoot() {
   if (!app.isPackaged) {
     return path.join(__dirname, '..');
@@ -306,7 +308,7 @@ function hideToTray() {
   if (!tray) {
     const image = nativeImage.createFromPath(iconPath());
     tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
-    tray.setToolTip('csFreeNote');
+    tray.setToolTip(`csFreeNote ${app.getVersion()}`);
     tray.on('click', showFromTray);
     tray.on('double-click', showFromTray);
     tray.setContextMenu(Menu.buildFromTemplate([
@@ -886,6 +888,117 @@ function registerIpc() {
     const files = await fsp.readdir(templates);
     return files.filter((f) => NOTE_EXT.test(f)).map((f) => f.replace(NOTE_EXT, ''));
   });
+
+  // The version the user is actually running. Asked for when somebody is
+  // reporting a problem, so it has to be the running build rather than
+  // anything written into the page.
+  ipcMain.handle('app:version', async () => app.getVersion());
+
+  /**
+   * Write a note out as a PDF.
+   *
+   * Not a print dialog. webContents.print was tried first and never came back
+   * on this platform — hidden window, offscreen window, visible window, all of
+   * them sat there with no printer chooser and no callback. printToPDF needs
+   * neither a window on screen nor anybody to click, and it answers in a
+   * quarter of a second.
+   *
+   * What the user loses is the printer list; what they get is a file they can
+   * open and print from anywhere. What they gain is that it works.
+   *
+   * The note is opened again on its own, which is why the app's own chrome is
+   * not in the file, and why the dark rendering is not either — that belongs
+   * to the screen. The file is read from disk, so the renderer saves first.
+   */
+  ipcMain.handle('note:pdf', async (_e, { relativePath }) => {
+    let full;
+    try {
+      full = noteIO.safeJoin(bookDir(), relativePath);
+    } catch {
+      return { ok: false, message: '그 노트를 찾을 수 없습니다.' };
+    }
+    if (!fs.existsSync(full)) return { ok: false, message: '그 노트를 찾을 수 없습니다.' };
+
+    const stem = path.basename(full).replace(/\.(htm|html)$/i, '');
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: 'PDF로 저장',
+      // Out of the book by default. A .pdf sitting in the notes folder is not a
+      // note, and the tree would carry it around without ever showing it.
+      defaultPath: path.join(app.getPath('documents'), `${stem}.pdf`),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (picked.canceled || !picked.filePath) return { ok: true, saved: false };
+
+    const sheet = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    try {
+      await sheet.loadFile(full);
+      // Give the note's own stylesheet and its pictures a moment to land.
+      await new Promise((done) => { setTimeout(done, 250); });
+      const pdf = await sheet.webContents.printToPDF({ printBackground: true });
+      await noteIO.writeFileAtomic(picked.filePath, pdf);
+      lastPdf = picked.filePath;
+      return { ok: true, saved: true, path: picked.filePath };
+    } catch (err) {
+      return { ok: false, message: `PDF로 저장하지 못했습니다: ${err.message}` };
+    } finally {
+      if (!sheet.isDestroyed()) sheet.destroy();
+    }
+  });
+
+  /** Open something this app just wrote, by a path it chose itself. */
+  ipcMain.handle('shell:openPath', async (_e, target) => {
+    const failed = await shell.openPath(String(target || ''));
+    return failed ? { ok: false, message: failed } : { ok: true };
+  });
+
+  /**
+   * Open the PDF that was just written.
+   *
+   * The path is the one this process chose a moment ago, remembered here
+   * rather than handed back and returned — a channel that opens whatever path
+   * it is given is a wider door than anything else in this app has.
+   */
+  ipcMain.handle('pdf:open', async () => {
+    if (!lastPdf || !fs.existsSync(lastPdf)) return { ok: false, message: '그 파일이 없습니다.' };
+    const failed = await shell.openPath(lastPdf);
+    return failed ? { ok: false, message: failed } : { ok: true };
+  });
+
+  /**
+   * Follow a link a note carries to one of the book's own files.
+   *
+   * The note says where it wants to go and this decides whether it may. An
+   * attachment link is written by the app, but the note it sits in is a
+   * document from somewhere we cannot vouch for, so the href is treated as a
+   * claim rather than an instruction: resolved against the note's own folder,
+   * then refused unless it lands inside the book. safeJoin is what says no.
+   *
+   * Links with a scheme never arrive here — the renderer sends http and https
+   * to the browser and drops the rest.
+   */
+  ipcMain.handle('note:openLink', async (_e, { relativePath, href }) => {
+    const raw = String(href || '');
+    if (!raw || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) || raw.startsWith('/')) {
+      return { ok: false, message: '열 수 없는 링크입니다.' };
+    }
+    let target;
+    try {
+      const noteDir = path.dirname(noteIO.safeJoin(bookDir(), relativePath));
+      const wanted = decodeURIComponent(raw.split(/[?#]/)[0]);
+      // Resolved from the note's folder, then checked against the book: a link
+      // reading ../../../ lands outside and is refused here.
+      target = noteIO.safeJoin(bookDir(), path.relative(bookDir(), path.resolve(noteDir, wanted)));
+    } catch {
+      return { ok: false, message: '노트책 바깥은 열지 않습니다.' };
+    }
+    if (!fs.existsSync(target)) return { ok: false, message: '그 파일이 없습니다.' };
+    const failed = await shell.openPath(target);
+    return failed ? { ok: false, message: failed } : { ok: true };
+  });
+
 }
 
 // Two copies of the app sharing one book would fight over the same files, and

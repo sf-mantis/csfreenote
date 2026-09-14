@@ -16,13 +16,23 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { app, ipcMain, shell } = require('electron');
+const { app, ipcMain, shell, dialog } = require('electron');
 
 // One channel's whole job is to open a browser. Hold that back so the suite
 // stays true to "npm test does not touch the machine", and record that it was
 // asked -- being asked is the thing worth checking.
 const opened = [];
 shell.openExternal = async (url) => { opened.push(url); };
+
+// Saving a PDF asks where to put it, and nothing here could answer that box.
+// The chooser is held back and told to answer with a path in the throwaway
+// folder, so the writing itself still happens for real.
+let pdfTarget = null;
+function holdBackTheSaveBox(target) {
+  pdfTarget = target;
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: pdfTarget });
+}
+
 
 let passed = 0;
 let failed = 0;
@@ -59,6 +69,7 @@ const NOTE = '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
   + '<body><p>내용</p></body></html>';
 
 async function main() {
+
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csfreenote-ipc-'));
   const book = path.join(root, 'BookData');
   fs.mkdirSync(path.join(book, '폴더'), { recursive: true });
@@ -182,6 +193,57 @@ async function main() {
   ok('받는 곳 하나만 열림', opened.length === 1, JSON.stringify(opened));
   ok('받는 곳은 이 저장소의 releases',
     opened[0] === 'https://github.com/sf-mantis/csfreenote/releases/latest', opened[0]);
+
+  const version = await call('app:version');
+  ok('실제 도는 판을 알려줌', /^[0-9]+[.][0-9]+[.][0-9]+/.test(String(version)), String(version));
+
+  // 앞 단계들이 노트를 옮기고 이름을 바꿔 놓았으므로, 내보낼 것은 여기서 새로
+  // 놓는다. 없는 노트를 내보내면 아무 일도 일어나지 않는데, 그것을 통과로
+  // 읽으면 이 검사는 아무것도 지키지 못한다.
+  fs.writeFileSync(path.join(book, 'PDF로 만들 노트.html'), NOTE, 'utf8');
+  const pdfPath = path.join(root, '만든 것.pdf');
+  holdBackTheSaveBox(pdfPath);
+
+  const made = await checked('note:pdf', 'note:pdf', { relativePath: 'PDF로 만들 노트.html' });
+  ok('PDF 저장이 받아들여짐', made && made.ok === true && made.saved === true,
+    JSON.stringify(made));
+  ok('파일이 실제로 생김', fs.existsSync(pdfPath));
+  // %PDF is what every reader looks for; a zero-length file would pass a
+  // bare existsSync and open as nothing.
+  ok('진짜 PDF 임',
+    fs.existsSync(pdfPath) && fs.readFileSync(pdfPath).subarray(0, 4).toString() === '%PDF',
+    fs.existsSync(pdfPath) ? String(fs.statSync(pdfPath).size) + ' bytes' : '(없음)');
+
+  const noNote = await call('note:pdf', { relativePath: '없는노트.html' });
+  ok('없는 노트는 내보내지 않고 알린다', noNote && noNote.ok === false, JSON.stringify(noNote));
+
+  // 저장 위치를 묻다 그만두면 파일도 만들지 않고 실패도 아니다.
+  dialog.showSaveDialog = async () => ({ canceled: true, filePath: undefined });
+  const stopped = await call('note:pdf', { relativePath: 'PDF로 만들 노트.html' });
+  ok('그만두면 실패가 아니다', stopped && stopped.ok === true && stopped.saved === false,
+    JSON.stringify(stopped));
+
+  // 본문이 가리키는 파일을 여는 길. 노트책 밖은 열지 않는다는 것이 핵심이다.
+  const opened2 = [];
+  shell.openPath = async (target) => { opened2.push(target); return ''; };
+
+  fs.mkdirSync(path.join(book, '_files', 'PDF로 만들 노트'), { recursive: true });
+  fs.writeFileSync(path.join(book, '_files', 'PDF로 만들 노트', '붙임.txt'), 'x', 'utf8');
+  const followed = await checked('note:openLink', 'note:openLink', {
+    relativePath: 'PDF로 만들 노트.html',
+    href: '_files/PDF%EB%A1%9C%20%EB%A7%8C%EB%93%A4%20%EB%85%B8%ED%8A%B8/%EB%B6%99%EC%9E%84.txt',
+  });
+  ok('붙임 링크를 연다', followed && followed.ok === true && opened2.length === 1,
+    JSON.stringify(followed));
+  ok('연 것이 그 파일이다', /붙임\.txt$/.test(opened2[0] || ''), opened2[0]);
+
+  const escaped = await call('note:openLink',
+    { relativePath: 'PDF로 만들 노트.html', href: '../../../Windows/System32/notepad.exe' });
+  ok('노트책 밖은 열지 않는다', escaped && escaped.ok === false, JSON.stringify(escaped));
+  const scheme = await call('note:openLink',
+    { relativePath: 'PDF로 만들 노트.html', href: 'file:///C:/Windows/notepad.exe' });
+  ok('스킴이 붙은 링크도 열지 않는다', scheme && scheme.ok === false, JSON.stringify(scheme));
+  ok('거절한 것은 열리지 않았다', opened2.length === 1, String(opened2.length));
 
   console.log(`\n통과 ${passed} / 실패 ${failed}`);
   fs.rmSync(root, { recursive: true, force: true });

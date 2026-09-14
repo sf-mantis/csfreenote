@@ -12,7 +12,7 @@
   <div id="app">
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
-        <div class="brand">
+        <div class="brand" id="brand" title="csFreeNote">
           <span class="brand-mark">cs</span>
           <span class="brand-name">FreeNote</span>
         </div>
@@ -77,6 +77,8 @@
 
         <div class="toolbar-right">
           <span id="saveStatus" class="save-status">준비됨</span>
+          <button type="button" id="btnPrint" class="icon-btn"
+                  title="PDF로 저장 (Ctrl+P)">🖶</button>
           <button type="button" id="btnSettings" class="icon-btn" title="환경설정">⚙</button>
           <button type="button" id="btnTheme" class="icon-btn" title="테마 전환">☾</button>
           <button type="button" id="btnShowTree" class="icon-btn hidden" title="트리 보이기">»</button>

@@ -2278,6 +2278,68 @@ async function clickingAPictureSelectsIt(win) {
 }
 
 /**
+ * Ctrl+P and the toolbar button have to reach the main process.
+ *
+ * Both are wired in the renderer, but wired is not the same as reached: a
+ * shortcut can be swallowed by an earlier branch, and a button can be bound
+ * before the element exists. What is checked here is that the ask arrives,
+ * carrying the note the user is looking at.
+ */
+async function printingReachesTheMainProcess(win) {
+  console.log('\n■ 인쇄');
+
+  const r = await win.webContents.executeJavaScript(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const pick = (m) => [...document.querySelectorAll('.mode-btn')].find(b => b.dataset.mode === m);
+    const asks = () => window.__calls.filter(c => c.name === 'saveNotePdf');
+
+    pick('browse').click();
+    await wait(500);
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(400);
+
+    const button = document.getElementById('btnPrint');
+    const hasButton = !!button;
+    window.__calls.length = 0;
+
+    button.click();
+    await wait(400);
+    const afterClick = asks().length;
+    const asked = asks()[0] || null;
+
+    window.__calls.length = 0;
+    document.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'p', ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(400);
+    const afterKey = asks().length;
+
+    // 프레임 안에 포커스가 있을 때도 닿아야 한다 — 편집하다 누르는 자리다
+    pick('edit').click();
+    await wait(350);
+    window.__calls.length = 0;
+    const d = document.getElementById('noteFrame').contentDocument;
+    d.dispatchEvent(new d.defaultView.KeyboardEvent('keydown',
+      { key: 'p', ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(400);
+    const afterFrameKey = asks().length;
+
+    pick('browse').click();
+    await wait(400);
+    return { hasButton, afterClick, afterKey, afterFrameKey, asked };
+  })()`, true);
+
+  ok('인쇄 단추가 있다', r.hasButton);
+  ok('단추를 누르면 PDF 저장을 부른다', r.afterClick === 1, String(r.afterClick));
+  ok('보고 있는 노트를 넘긴다',
+    r.asked && r.asked.payload && r.asked.payload.relativePath === '루트노트.html',
+    JSON.stringify(r.asked && r.asked.payload));
+  ok('Ctrl-P 로도 부른다', r.afterKey === 1, String(r.afterKey));
+  ok('노트 안에서 눌러도 부른다', r.afterFrameKey === 1, String(r.afterFrameKey));
+}
+
+/**
  * The dark rendering must map the note's own colours, follow the single theme
  * control, and never reach the file.
  */
@@ -2915,6 +2977,7 @@ app.whenReady().then(async () => {
   await findInNote(win);
   await replaceInNote(win);
   await clickingAPictureSelectsIt(win);
+  await printingReachesTheMainProcess(win);
   await darkNoteSurface(win);
 
   await statusBar(win);

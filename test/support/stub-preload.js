@@ -94,6 +94,10 @@ window.csNote = {
     addAttachments: record('addAttachments', { ok: true, added: [] }),
     removeAttachment: record('removeAttachment', { ok: true }),
     openAttachment: record('openAttachment', { ok: true }),
+    appVersion: () => Promise.resolve('0.0.0-test'),
+    saveNotePdf: record('saveNotePdf', { ok: true, saved: true }),
+    openSavedPdf: record('openSavedPdf', { ok: true }),
+    openNoteLink: record('openNoteLink', { ok: true }),
     attachmentRef: ({ name }) => Promise.resolve({
       name,
       href: '_files/노트/' + name,

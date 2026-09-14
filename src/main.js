@@ -109,6 +109,7 @@ const el = {
   noteTitle: document.getElementById('noteTitle'),
   notePath: document.getElementById('notePath'),
   saveStatus: document.getElementById('saveStatus'),
+  brand: document.getElementById('brand'),
   findBar: document.getElementById('findBar'),
   sourceMark: document.getElementById('sourceMark'),
   findInput: document.getElementById('findInput'),
@@ -423,6 +424,31 @@ async function forceSave() {
   await save({ force: true });
 }
 
+/**
+ * Write the note out as a PDF.
+ *
+ * Saved first: the main process reads the file on disk, so anything still in
+ * the editor would simply not be in the PDF.
+ *
+ * This was a print dialog until the dialog turned out never to appear on this
+ * platform - see note:pdf in the main process. A file the user can open and
+ * print from anywhere is less than printing, and it works.
+ */
+async function savePdf() {
+  if (!state.currentPath || !api.saveNotePdf) return;
+  await flushPending();
+  const result = await api.saveNotePdf({ relativePath: state.currentPath });
+  if (!result) return;
+  if (result.ok === false) {
+    showToast(result.message);
+    return;
+  }
+  if (!result.saved) return;                     // 저장 위치를 묻다 그만둠
+  showToast('PDF로 저장했습니다.', 'notice', {
+    label: '열기',
+    run: () => api.openSavedPdf(),
+  });
+}
 async function confirmDiscard(action = 'leave') {
   if (!heldDocument()) return true;
   const closing = action === 'close';
@@ -2574,7 +2600,20 @@ function onFrameClick(event) {
   } else if (href.startsWith('#')) {
     // in-note anchor: let it be
   } else {
+    // A link to one of the book's own files — an attachment, most often.
+    // Following it here would replace the note in the frame with the file, so
+    // it is handed to the OS instead, the same way an outside link is handed
+    // to the browser. The href goes over as the note wrote it; where that
+    // lands, and whether it is allowed to, is decided in the main process.
+    //
+    // Browse mode only. In edit mode a click is for putting the caret
+    // somewhere, and opening a file out from under someone who was aiming at
+    // the text is not what they asked for.
     event.preventDefault();
+    if (state.mode !== 'browse' || !href || !api.openNoteLink) return;
+    api.openNoteLink({ relativePath: state.currentPath, href }).then((result) => {
+      if (result && result.ok === false) showToast(result.message);
+    });
   }
 }
 
@@ -3666,6 +3705,7 @@ function bindEvents() {
   // The book button now opens the list rather than a folder picker: with more
   // than one book, "change folder" was the wrong question.
   document.getElementById('btnBookDir').onclick = () => void openSettings();
+  document.getElementById('btnPrint').addEventListener('click', () => void savePdf());
   document.getElementById('btnSettings').onclick = () => void openSettings();
   document.getElementById('settingsClose').onclick = closeSettings;
   el.settings.addEventListener('click', (event) => {
@@ -3973,6 +4013,11 @@ function handleShortcut(event) {
       openFind({ replace: true });
       return;
     }
+    if (mod && (key === 'P' || key === 'p')) {
+      event.preventDefault();
+      void savePdf();
+      return;
+    }
     if (mod && (key === 'S' || key === 's')) {
       event.preventDefault();
       save();
@@ -4044,6 +4089,13 @@ async function init() {
   bindEvents();
   bindLifecycle();
   state.templates = await api.listTemplates().catch(() => []);
+  // 어느 판을 쓰고 있는지. 자주 볼 것이 아니라 늘 보일 자리를 내주지 않고,
+  // 로고에 마우스를 올렸을 때만 말한다. 페이지에 적어둔 값이 아니라 실제
+  // 도는 판을 묻는다 — 문제를 받을 때 필요한 것은 그쪽이다.
+  if (api.appVersion && el.brand) {
+    const version = await api.appVersion().catch(() => null);
+    if (version) el.brand.title = `csFreeNote ${version}`;
+  }
   state.formats = (await api.getSettings().catch(() => null))?.formats || [];
   await refreshTree();
 

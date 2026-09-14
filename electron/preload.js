@@ -43,6 +43,12 @@ contextBridge.exposeInMainWorld('csNote', {
   // goes is decided in the main process.
   onUpdateAvailable: (handler) => ipcRenderer.on('app:update', (_e, found) => handler(found)),
   openReleases: () => ipcRenderer.invoke('app:openReleases'),
+  appVersion: () => ipcRenderer.invoke('app:version'),
+  saveNotePdf: (payload) => ipcRenderer.invoke('note:pdf', payload),
+  // No path crosses either of these. The PDF is the one this app just wrote,
+  // and a note link is resolved and checked in the main process.
+  openSavedPdf: () => ipcRenderer.invoke('pdf:open'),
+  openNoteLink: (payload) => ipcRenderer.invoke('note:openLink', payload),
 
   // Files a note carries. A note path and a file name cross here, never a
   // path of our own making: the main process resolves every one of them.
