@@ -1,0 +1,95 @@
+# Build the installer where anyone can check that it came from this source.
+#
+# Until now the installer was made on one person's machine and uploaded by
+# hand. Nothing tied the file to a commit: two builds of two versions sat in
+# the same folder and the wrong one was nearly published. A build here is
+# tied to the tag it was cut from, and the log says what it did.
+#
+# It does not publish. It attaches the file to the release for that tag, or
+# opens a draft if there is no release yet — the words that go with a release
+# are still written by a person.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Run it by hand to check the build without cutting a release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # Electron itself is a ~100 MB download that does not change between
+      # builds of the same version.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npm ci
+
+      # A tag that does not match package.json would produce an installer
+      # whose name and version disagree with the release it hangs under.
+      - name: 태그와 판 번호가 같은지
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(node -p "require('./package.json').version")"
+          if [ "$want" != "$have" ]; then
+            echo "태그는 $GITHUB_REF_NAME 인데 package.json 은 $have 입니다."
+            exit 1
+          fi
+          echo "둘 다 $have"
+
+      - name: 검사
+        run: npm test
+
+      - name: 설치본 만들기
+        shell: bash
+        run: |
+          npm run build
+          npx electron-builder --publish never
+
+      - name: 만들어진 것
+        shell: bash
+        run: ls -l release/*.exe
+
+      # Kept whether or not this is a release, so a workflow_dispatch run
+      # leaves something to look at.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: release/*.exe
+          retention-days: 14
+
+      - name: 릴리즈에 붙이기
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/*.exe --clobber
+            echo "이미 있는 릴리즈 $tag 에 붙였습니다."
+          else
+            gh release create "$tag" --draft --title "csFreeNote ${tag#v}" \
+              --notes "설명을 적고 펴내 주세요." release/*.exe
+            echo "초안 릴리즈 $tag 를 만들었습니다. 설명을 적고 펴내야 합니다."
+          fi
