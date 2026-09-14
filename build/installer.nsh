@@ -40,21 +40,106 @@ $INSTDIR$\r$\n$\r$\n\
     skip_prompt:
   ${endIf}
 
+  ; $R9 = "wipe" until something the user owns turns out to be still in place.
+  StrCpy $R9 "wipe"
+
   ${if} $R8 == "keep"
     ; Move what belongs to the user out of the way, wipe, put it back.
+    ;
+    ; Rename is best effort. Windows refuses to move a folder while any file
+    ; anywhere inside it is open — with any sharing mode, by any process — and
+    ; says so only through the error flag. The wipe below did not read it, and
+    ; so a real install lost a book of notes: something was reading one of the
+    ; 86 note files, BookData could not be moved, RMDir /r ran regardless.
+    ; csTemplate, three files that nothing happened to be reading, came back.
+    ;
+    ; Whoever holds it is rarely the program itself, which the installer has
+    ; already closed by now — it is a virus scanner, the search indexer, a
+    ; company agent walking the disk. Those handles last a moment, so try
+    ; again a few times before concluding anything.
     CreateDirectory "$PLUGINSDIR\keep"
-    Rename "$INSTDIR\BookData" "$PLUGINSDIR\keep\BookData"
-    Rename "$INSTDIR\csTemplate" "$PLUGINSDIR\keep\csTemplate"
-    Rename "$INSTDIR\csFreeNote.json" "$PLUGINSDIR\keep\csFreeNote.json"
+    StrCpy $R5 0
+    move_aside:
+      Rename "$INSTDIR\BookData" "$PLUGINSDIR\keep\BookData"
+      Rename "$INSTDIR\csTemplate" "$PLUGINSDIR\keep\csTemplate"
+      Rename "$INSTDIR\csFreeNote.json" "$PLUGINSDIR\keep\csFreeNote.json"
+      ; Ask the disk rather than the flag. Anything still standing here did
+      ; not move, and the wipe would destroy it.
+      IfFileExists "$INSTDIR\BookData" retry_move 0
+      IfFileExists "$INSTDIR\csTemplate" retry_move 0
+      IfFileExists "$INSTDIR\csFreeNote.json" retry_move 0
+      Goto moved
+    retry_move:
+      IntOp $R5 $R5 + 1
+      IntCmp $R5 8 give_up 0 give_up
+      Sleep 500
+      Goto move_aside
+    give_up:
+      ; Put back whatever did move, and leave the folder standing. Old program
+      ; files that outlive this are overwritten by the install that follows, or
+      ; sit there unused; notes are not something a later step can put back.
+      Rename "$PLUGINSDIR\keep\BookData" "$INSTDIR\BookData"
+      Rename "$PLUGINSDIR\keep\csTemplate" "$INSTDIR\csTemplate"
+      Rename "$PLUGINSDIR\keep\csFreeNote.json" "$INSTDIR\csFreeNote.json"
+      StrCpy $R9 "spare"
+    moved:
   ${endIf}
 
-  RMDir /r $INSTDIR
+  ${if} $R9 == "wipe"
+    RMDir /r $INSTDIR
+  ${else}
+    ; The program's own files, named one at a time. BookData, csTemplate and
+    ; the settings are not named here and so cannot be reached from this
+    ; branch even if the judgement that led to it was wrong.
+    RMDir /r "$INSTDIR\locales"
+    RMDir /r "$INSTDIR\resources"
+    RMDir /r "$INSTDIR\swiftshader"
+    RMDir /r "$INSTDIR\temp"
+    Delete "$INSTDIR\*.dll"
+    Delete "$INSTDIR\*.pak"
+    Delete "$INSTDIR\*.bin"
+    Delete "$INSTDIR\*.dat"
+    Delete "$INSTDIR\csFreeNote.exe"
+    Delete "$INSTDIR\icon.ico"
+    Delete "$INSTDIR\vk_swiftshader_icd.json"
+    Delete "$INSTDIR\LICENSE.electron.txt"
+    Delete "$INSTDIR\LICENSES.chromium.html"
+    Delete "$INSTDIR\Uninstall csFreeNote.exe"
+  ${endIf}
 
   ${if} $R8 == "keep"
+  ${andif} $R9 == "wipe"
+    ; The way back is the same risk mirrored. The notes are now in a folder
+    ; that this program deletes when it ends, and a scanner that follows them
+    ; there is enough to refuse the move home. So: try again, and then stop
+    ; trying to move and copy instead — copying only has to read, which a
+    ; scanner holding a note does not prevent.
     CreateDirectory "$INSTDIR"
-    Rename "$PLUGINSDIR\keep\BookData" "$INSTDIR\BookData"
-    Rename "$PLUGINSDIR\keep\csTemplate" "$INSTDIR\csTemplate"
-    Rename "$PLUGINSDIR\keep\csFreeNote.json" "$INSTDIR\csFreeNote.json"
+    StrCpy $R5 0
+    put_back:
+      Rename "$PLUGINSDIR\keep\BookData" "$INSTDIR\BookData"
+      Rename "$PLUGINSDIR\keep\csTemplate" "$INSTDIR\csTemplate"
+      Rename "$PLUGINSDIR\keep\csFreeNote.json" "$INSTDIR\csFreeNote.json"
+      ; Anything still in the holding folder has not come home.
+      IfFileExists "$PLUGINSDIR\keep\BookData" retry_back 0
+      IfFileExists "$PLUGINSDIR\keep\csTemplate" retry_back 0
+      IfFileExists "$PLUGINSDIR\keep\csFreeNote.json" retry_back 0
+      Goto back_home
+    retry_back:
+      IntOp $R5 $R5 + 1
+      IntCmp $R5 8 copy_back 0 copy_back
+      Sleep 500
+      Goto put_back
+    copy_back:
+      ; Leaves the originals behind, which costs nothing: the holding folder
+      ; is thrown away in a moment either way.
+      IfFileExists "$PLUGINSDIR\keep\BookData" 0 +2
+        CopyFiles /SILENT "$PLUGINSDIR\keep\BookData" "$INSTDIR"
+      IfFileExists "$PLUGINSDIR\keep\csTemplate" 0 +2
+        CopyFiles /SILENT "$PLUGINSDIR\keep\csTemplate" "$INSTDIR"
+      IfFileExists "$PLUGINSDIR\keep\csFreeNote.json" 0 +2
+        CopyFiles /SILENT "$PLUGINSDIR\keep\csFreeNote.json" "$INSTDIR"
+    back_home:
     ; If there was nothing to keep, do not leave an empty folder behind.
     RMDir "$INSTDIR"
   ${endIf}

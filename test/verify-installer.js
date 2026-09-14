@@ -65,12 +65,30 @@ const sleep = (ms) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
+const appRunning = () => /csFreeNote\.exe/i
+  .test(spawnSync('tasklist', [], { encoding: 'utf8' }).stdout || '');
+
+/**
+ * Close the app, and be sure it is closed.
+ *
+ * Looking once is not enough. The installer starts the app when it finishes,
+ * even silently, and an app that is starting does not appear in the task list
+ * for a moment — so a single look says "not running" and the next step runs
+ * against a program that is about to hold its own executable open. That is
+ * how the plain-uninstall check came to report csFreeNote.exe left behind
+ * when the uninstaller had done nothing wrong.
+ */
 function killApp() {
-  for (let i = 0; i < 20; i += 1) {
-    const listed = spawnSync('tasklist', [], { encoding: 'utf8' }).stdout || '';
-    if (!/csFreeNote\.exe/i.test(listed)) return;
-    spawnSync('taskkill', ['/IM', 'csFreeNote.exe', '/F'], { stdio: 'ignore' });
-    sleep(200);
+  for (let round = 0; round < 40; round += 1) {
+    while (appRunning()) {
+      spawnSync('taskkill', ['/IM', 'csFreeNote.exe', '/F'], { stdio: 'ignore' });
+      sleep(300);
+    }
+    sleep(500);
+    if (!appRunning()) {
+      sleep(1500);
+      if (!appRunning()) return;
+    }
   }
 }
 
@@ -222,6 +240,46 @@ function addUserData() {
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, NOTE, 'utf8');
   }
+}
+
+/**
+ * Hold one note open, the way a virus scanner or the search indexer does.
+ *
+ * Windows refuses to move a folder while any file anywhere inside it is open
+ * — any process, any sharing mode, even sharing everything. That is what took
+ * a real book of notes: something was reading one of the 86 files, the
+ * uninstaller could not move BookData aside, and it wiped the folder anyway.
+ * csTemplate, three files nothing happened to be reading, came back.
+ *
+ * Nothing here can stop that handle appearing; a machine with a company agent
+ * walking the disk will produce one sooner or later. So what is checked is
+ * that the uninstaller survives it.
+ */
+function holdNoteOpen(seconds) {
+  const note = path.join(APP, 'BookData', '내 폴더', '중요.html');
+  // detached 로 띄우면 콘솔이 없어 PowerShell 이 곧바로 끝나 버린다. 그러면
+  // 아무것도 붙잡히지 않은 채 검사가 통과하고, 통과했다는 사실만 남는다.
+  const held = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+    `$f=[System.IO.File]::Open('${note}','Open','Read','Read');`
+    + ` Start-Sleep -Seconds ${seconds}; $f.Close()`],
+  { windowsHide: true, stdio: 'ignore' });
+  sleep(4000); // 실제로 열릴 때까지
+  return held;
+}
+
+/** 손잡이가 정말 잡혔는가. 잡히지 않았다면 그 뒤의 검사는 아무 뜻이 없다. */
+function reallyHeld() {
+  try {
+    fs.renameSync(path.join(APP, 'BookData'), path.join(APP, 'BookData-옮겨보기'));
+    fs.renameSync(path.join(APP, 'BookData-옮겨보기'), path.join(APP, 'BookData'));
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function letGo(held) {
+  spawnSync('taskkill', ['/PID', String(held.pid), '/F', '/T'], { stdio: 'ignore' });
 }
 
 /** Are the note's companions still there? Returns the ones that are not. */
@@ -401,6 +459,31 @@ function run() {
     !fs.existsSync(mark));
   ok('백업·그림·붙임도 그대로',
     missingCompanions().length === 0, missingCompanions().join(', '));
+
+  // 위의 검사는 아무도 노트를 건드리지 않는 조용한 기계에서만 참이었다. 실제로
+  // 판을 올린 기계에서는 무언가가 노트 하나를 읽고 있었고, 옮기기가 거부되자
+  // 갈아엎기는 그대로 실행되어 노트책이 통째로 사라졌다. 옮기지 못했으면
+  // 갈아엎지 않는다 — 프로그램 파일이 좀 남는 편이 노트를 잃는 것보다 낫다.
+  console.log('\n■ 누가 노트를 읽고 있는 중에 덮어 깔아도 노트는 남는다');
+  addUserData();
+  killApp();
+  const guarded = path.join(APP, 'BookData', '내 폴더', '중요.html');
+  const guardedBefore = fs.readFileSync(guarded, 'utf8');
+  const held = holdNoteOpen(300);
+  ok('노트를 붙잡은 것이 실제로 폴더 이동을 막는다', reallyHeld());
+  upgradeInPlace();
+  letGo(held);
+
+  ok('프로그램이 다시 놓임', fs.existsSync(path.join(APP, 'csFreeNote.exe')));
+  ok('읽히고 있던 노트가 그대로',
+    fs.existsSync(guarded) && fs.readFileSync(guarded, 'utf8') === guardedBefore);
+  ok('백업·그림·붙임도 그대로',
+    missingCompanions().length === 0, missingCompanions().join(', '));
+  ok('직접 만든 양식도 그대로',
+    fs.existsSync(path.join(APP, 'csTemplate', '내 양식.html')));
+  ok('설정도 그대로', fs.existsSync(path.join(APP, 'csFreeNote.json')));
+  ok('기본 노트도 그대로',
+    fs.existsSync(path.join(APP, 'BookData', 'csFreeNote', '1 소개.html')));
 
   console.log('\n■ 그냥 제거하면 노트는 남는다');
   addUserData();
