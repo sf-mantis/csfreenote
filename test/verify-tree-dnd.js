@@ -12,6 +12,7 @@
  * Usage: npx electron test/verify-tree-dnd.js
  */
 
+const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
 
@@ -2939,7 +2940,26 @@ app.whenReady().then(async () => {
     if (/error|Refused/i.test(msg)) console.log(`    [renderer] ${msg}`);
   });
 
-  await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  // 이 검사만 홀로 진짜 렌더러를 띄운다. 그 렌더러는 vite 가 만든 것이라
+  // 저장소에 없고, 사람 기계에는 지난 빌드가 남아 있어 없는 줄을 모른다.
+  // 갓 받아온 기계에서는 없고, loadFile 의 거절은 아무도 받지 않아 검사가
+  // 영원히 매달린다 — CI 에서 35분을 말없이 앉아 있다 잘렸다.
+  const page = path.join(__dirname, '..', 'dist', 'index.html');
+  if (!fs.existsSync(page)) {
+    console.error('');
+    console.error('  렌더러가 아직 만들어지지 않았습니다:');
+    console.error(`    ${page}`);
+    console.error('');
+    console.error('  먼저 npm run build 를 실행하세요.');
+    console.error('');
+    process.exit(1);
+  }
+  try {
+    await win.loadFile(page);
+  } catch (err) {
+    console.error(`  렌더러를 띄우지 못했습니다: ${err.message}`);
+    process.exit(1);
+  }
   await win.webContents.executeJavaScript('new Promise(r=>setTimeout(r,500))', true);
 
   const ready = await win.webContents.executeJavaScript(

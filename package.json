@@ -21,7 +21,7 @@
     "build": "vite build",
     "start": "electron .",
     "test:unit": "node test/verify-save.js && node test/verify-write.js && node test/verify-organise.js && node test/verify-links.js && node test/verify-attach.js && node test/verify-colors.js && node test/verify-search.js && node test/verify-seed.js && node test/verify-saving.js && node test/verify-update.js && node test/verify-config.js && node test/verify-datetime.js && node test/verify-wording.js",
-    "test:app": "electron test/verify-ipc.js && electron test/verify-tray.js && electron test/verify-frame.js && electron test/verify-tree-dnd.js",
+    "test:app": "npm run build && electron test/verify-ipc.js && electron test/verify-tray.js && electron test/verify-frame.js && electron test/verify-tree-dnd.js",
     "test": "npm run test:unit && npm run test:app",
     "dist": "npm run build && electron-builder",
     "test:installer": "node test/verify-installer.js"
