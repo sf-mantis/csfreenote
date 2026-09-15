@@ -1057,14 +1057,25 @@ async function arrowsFollowTheColumn(win) {
     // not in whichever cell the document happens to end with.
     const tail = d.getElementById('tail');
     const middle = d.getElementById('r1c2').getBoundingClientRect();
-    const hit = d.caretRangeFromPoint(middle.left + middle.width / 2,
-      tail.getBoundingClientRect().top + 4);
+    const x = middle.left + middle.width / 2;
+    const y = tail.getBoundingClientRect().top + 4;
+    const hit = d.caretRangeFromPoint(x, y);
     if (hit) {
       const sel = d.getSelection();
       sel.removeAllRanges();
       sel.addRange(hit);
     }
+    // 이 검사가 어긋났을 때 무엇을 보고 판단했는지 남긴다. "가로채지 않았다"
+    // 만으로는 칸을 잘못 짚은 것인지, 캐럿이 엉뚱한 데 있었는지 알 수 없다.
+    const before = at();
     const back = arrow('ArrowUp');
+    back.why = {
+      캐럿찍기: hit ? '됨' : '안됨',
+      누르기전: before,
+      r1c2: [Math.round(middle.left), Math.round(middle.width)],
+      찍은자리: [Math.round(x), Math.round(y)],
+      화면: [d.documentElement.clientWidth, d.documentElement.clientHeight],
+    };
 
     window.__doc = original;
     window.__mtime += 1;
@@ -1085,7 +1096,7 @@ async function arrowsFollowTheColumn(win) {
   ok('위로 가면 같은 열의 위 칸', r.up1.moved && r.up1.where === 'r1c2',
     `${r.up1.where} (가로챔 ${r.up1.moved})`);
   ok('표 밖에서 들어올 때도 같은 열', r.back.moved && r.back.where === 'r2c2',
-    `${r.back.where} (가로챔 ${r.back.moved})`);
+    `${r.back.where} (가로챔 ${r.back.moved}) ${JSON.stringify(r.back.why)}`);
 }
 
 /**
