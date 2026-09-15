@@ -1068,14 +1068,33 @@ async function arrowsFollowTheColumn(win) {
     // 이 검사가 어긋났을 때 무엇을 보고 판단했는지 남긴다. "가로채지 않았다"
     // 만으로는 칸을 잘못 짚은 것인지, 캐럿이 엉뚱한 데 있었는지 알 수 없다.
     const before = at();
-    const back = arrow('ArrowUp');
-    back.why = {
+    // 앱이 표로 들어갈지 정할 때 보는 것들을, 앱이 보는 그 순간에 잰다.
+    // 누른 뒤에 재면 성공한 기계에서는 이동한 자리가 찍혀 견줄 수가 없다.
+    const sel2 = d.getSelection();
+    const node2 = sel2.rangeCount ? sel2.getRangeAt(0).startContainer : null;
+    const blk = node2 && (node2.nodeType === 1 ? node2 : node2.parentElement);
+    const block = blk && blk.closest('p,div,td,li,h1,h2,h3');
+    const rects = sel2.rangeCount ? sel2.getRangeAt(0).getClientRects() : [];
+    const cr = rects.length ? rects[0] : null;
+    const bb = block ? block.getBoundingClientRect() : null;
+    const padTop = block
+      ? parseFloat(d.defaultView.getComputedStyle(block).paddingTop) || 0 : 0;
+    const why = {
       캐럿찍기: hit ? '됨' : '안됨',
       누르기전: before,
+      블록: block ? (block.id || block.tagName) : '없음',
+      앞형제: block && block.previousElementSibling
+        ? block.previousElementSibling.tagName : '없음',
+      캐럿상자: cr ? [Math.round(cr.top), Math.round(cr.left)] : '없음',
+      블록상자: bb ? [Math.round(bb.top), Math.round(bb.left)] : '없음',
+      여백위: padTop,
+      첫줄인가: cr && bb ? (cr.top <= bb.top + padTop + 2) : '알수없음',
       r1c2: [Math.round(middle.left), Math.round(middle.width)],
       찍은자리: [Math.round(x), Math.round(y)],
       화면: [d.documentElement.clientWidth, d.documentElement.clientHeight],
     };
+    const back = arrow('ArrowUp');
+    back.why = why;
 
     window.__doc = original;
     window.__mtime += 1;
