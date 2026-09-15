@@ -6,9 +6,9 @@
 > maintainer's machine. A build is triggered by pushing a `v*` tag; it checks
 > out that exact commit, installs from `package-lock.json` with `npm ci`,
 > **refuses to continue if the tag and the version in `package.json` disagree**,
-> runs the full test suite, and only then builds. The workflow attaches the
-> installer to that tag's release — or opens a **draft** if none exists — and
-> **never publishes**. Release notes are written and the release published by
+> runs the full test suite (17 suites, over 700 checks), and only then builds.
+> The workflow attaches the installer to that tag's release — or opens a
+> **draft** if none exists — and **never publishes**. Release notes are written and the release published by
 > the repository owner, [@sf-mantis](https://github.com/sf-mantis), who is the
 > only account with push and release rights and has two-factor authentication
 > enabled. Every run is public at
