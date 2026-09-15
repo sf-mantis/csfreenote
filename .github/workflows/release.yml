@@ -57,8 +57,18 @@ jobs:
           fi
           echo "둘 다 $have"
 
-      - name: 검사
-        run: npm test
+      # Split, and each with a deadline. The first run of this workflow sat in
+      # `npm test` for thirty-five minutes and said nothing: one of the four
+      # tests that start Electron does not come back on a machine with no
+      # desktop, and a single step gives no way to tell which. A test that can
+      # hang forever is a bad test wherever it runs.
+      - name: 검사 — Electron 없이
+        timeout-minutes: 5
+        run: npm run test:unit
+
+      - name: 검사 — Electron
+        timeout-minutes: 8
+        run: npm run test:app
 
       - name: 설치본 만들기
         shell: bash
