@@ -1096,6 +1096,46 @@ async function arrowsFollowTheColumn(win) {
     const back = arrow('ArrowUp');
     back.why = why;
 
+    // 캐럿이 자기 줄 안쪽으로 얼마나 내려앉는지는 글꼴이 정한다. 넉넉한 줄
+    // 간격은 그것을 크게 벌려서, 픽셀 몇 개를 여유로 두고 '첫 줄인가'를
+    // 재던 옛 방식이 어느 기계에서나 틀리게 만든다. 러너에서만 3px 이 나서
+    // 2px 짜리 여유를 1px 차이로 넘긴 그 일을, 여기서는 늘 일으킨다.
+    window.__doc = '<html><head><title>t</title><style>p{margin:0}'
+      + '#tall{line-height:4}</style></head><body>'
+      + '<table border="1" cellpadding="6">'
+      + '<tr><td id="s1c1">A1</td><td id="s1c2">B1</td></tr>'
+      + '<tr><td id="s2c1">A2</td><td id="s2c2">B2</td></tr>'
+      + '</table><p id="tall">줄 간격이 넓은 문단</p></body></html>';
+    window.__mtime += 1;
+    pick('browse').click();
+    await wait(200);
+    document.querySelector('[data-path="폴더A/안쪽노트.html"] > .tree-row').click();
+    await wait(200);
+    document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
+    await wait(300);
+    pick('edit').click();
+    await wait(300);
+
+    const d2 = document.getElementById('noteFrame').contentDocument;
+    const tall = d2.getElementById('tall');
+    const col = d2.getElementById('s1c2').getBoundingClientRect();
+    const spot = d2.caretRangeFromPoint(col.left + col.width / 2,
+      tall.getBoundingClientRect().top + 4);
+    let loose = { moved: false, where: '캐럿을 못 찍음', gap: null };
+    if (spot) {
+      const s2 = d2.getSelection();
+      s2.removeAllRanges();
+      s2.addRange(spot);
+      const rect = s2.getRangeAt(0).getClientRects()[0];
+      const gap = rect ? Math.round(rect.top - tall.getBoundingClientRect().top) : null;
+      const ev = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+      d2.dispatchEvent(ev);
+      const sn = d2.getSelection().getRangeAt(0).startContainer;
+      const el2 = sn.nodeType === 1 ? sn : sn.parentElement;
+      const cell2 = el2.closest('td');
+      loose = { moved: ev.defaultPrevented, where: cell2 ? cell2.id : (el2.id || el2.tagName), gap };
+    }
+
     window.__doc = original;
     window.__mtime += 1;
     pick('browse').click();
@@ -1105,7 +1145,7 @@ async function arrowsFollowTheColumn(win) {
     document.querySelector('[data-path="루트노트.html"] > .tree-row').click();
     await wait(300);
 
-    return { down1, down2, up1, back };
+    return { down1, down2, up1, back, loose };
   })()`, true);
 
   ok('아래로 가면 같은 열의 아래 칸', r.down1.moved && r.down1.where === 'r2c1',
@@ -1116,6 +1156,10 @@ async function arrowsFollowTheColumn(win) {
     `${r.up1.where} (가로챔 ${r.up1.moved})`);
   ok('표 밖에서 들어올 때도 같은 열', r.back.moved && r.back.where === 'r2c2',
     `${r.back.where} (가로챔 ${r.back.moved}) ${JSON.stringify(r.back.why)}`);
+  // 캐럿이 줄 안쪽으로 깊이 앉는 문단에서도 같은 일이 되어야 한다. 픽셀
+  // 몇 개를 여유로 두고 재던 때에는 여기서 아무 일도 일어나지 않았다.
+  ok('줄 간격이 넓어도 표로 들어간다', r.loose.moved && r.loose.where === 's2c2',
+    `${r.loose.where} (가로챔 ${r.loose.moved}, 줄 안쪽 ${r.loose.gap}px)`);
 }
 
 /**

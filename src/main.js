@@ -2657,6 +2657,73 @@ function caretRect(range, fallback) {
 }
 
 /** The block the caret sits in — the thing a line-move steps out of. */
+/**
+ * The first and last lines of a block, as the browser laid them out.
+ *
+ * Whether the caret is on the first line cannot be settled by a few pixels of
+ * slack below the block's top edge. How far a caret sits inside its own line
+ * is the font's business — leading, ascent, the shape of the face — and it
+ * came out 3px on one machine against a 2px allowance, so Up from the line
+ * under a table did nothing there and worked everywhere else. One pixel.
+ *
+ * Ask the lines instead. These rects and the caret's rect are measured the
+ * same way, off the text rather than off the border box, so they can be
+ * compared without an allowance at all.
+ */
+function lineRects(block) {
+  const range = frameDoc.createRange();
+  range.selectNodeContents(block);
+  const rects = [...range.getClientRects()].filter((rect) => rect.height > 0);
+  if (!rects.length) {
+    const box = block.getBoundingClientRect();
+    return { first: box, last: box };
+  }
+  return { first: rects[0], last: rects[rects.length - 1] };
+}
+
+/**
+ * Is there anything on a line above `block` before you reach `container`?
+ *
+ * A cell holding three paragraphs has three first lines by the block's own
+ * reckoning, and only one of them is the top of the cell.
+ */
+function firstInside(block, container) {
+  let node = block;
+  while (node && node !== container) {
+    if (node.previousElementSibling) return false;
+    node = node.parentElement;
+  }
+  return node === container;
+}
+function lastInside(block, container) {
+  let node = block;
+  while (node && node !== container) {
+    if (node.nextElementSibling) return false;
+    node = node.parentElement;
+  }
+  return node === container;
+}
+
+/**
+ * Is the caret on the top line of that container? On the bottom line?
+ *
+ * Both rects come from the caret's own block, measured off its text the same
+ * way the caret is, so whatever the font puts between the line box and the
+ * glyphs falls out of the comparison. Measuring the container instead would
+ * compare a text rect against a border box, which is the mistake this
+ * replaced: 3px of leading against a 2px allowance.
+ */
+function atTopOf(caret, container) {
+  const block = caretBlock() || container;
+  if (caret.top > lineRects(block).first.top + 1) return false;
+  return firstInside(block, container);
+}
+function atBottomOf(caret, container) {
+  const block = caretBlock() || container;
+  if (caret.bottom < lineRects(block).last.bottom - 1) return false;
+  return lastInside(block, container);
+}
+
 function caretBlock() {
   const selection = frameDoc.getSelection();
   if (!selection || !selection.rangeCount) return null;
@@ -2716,11 +2783,7 @@ function enterTableByRow(down) {
   const selection = frameDoc.getSelection();
   if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
   const caret = caretRect(selection.getRangeAt(0), block);
-  const box = block.getBoundingClientRect();
-  const style = frameDoc.defaultView.getComputedStyle(block);
-  const onEdge = down
-    ? caret.bottom >= box.bottom - (parseFloat(style.paddingBottom) || 0) - 2
-    : caret.top <= box.top + (parseFloat(style.paddingTop) || 0) + 2;
+  const onEdge = down ? atBottomOf(caret, block) : atTopOf(caret, block);
   if (!onEdge) return false;
 
   const beside = down ? block.nextElementSibling : block.previousElementSibling;
@@ -2758,15 +2821,12 @@ function moveCaretByRow(down) {
   // put every empty line at the cell's top edge — so pressing Up from a blank
   // line made by Enter looked like leaving the cell, whichever line it was.
   const caret = caretRect(range, caretBlock() || cell);
-  const box = cell.getBoundingClientRect();
   const style = frameDoc.defaultView.getComputedStyle(cell);
   const padTop = parseFloat(style.paddingTop) || 0;
   const padBottom = parseFloat(style.paddingBottom) || 0;
 
   // Still a line to go inside this cell? Let the browser have it.
-  const onEdge = down
-    ? caret.bottom >= box.bottom - padBottom - 2
-    : caret.top <= box.top + padTop + 2;
+  const onEdge = down ? atBottomOf(caret, cell) : atTopOf(caret, cell);
   if (!onEdge) return false;
 
   const rows = [...table.rows];
